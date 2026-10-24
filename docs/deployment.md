@@ -54,10 +54,11 @@ the number of returned summaries, and whether the EPN campaign and delivery post
 
 ## 2. Prepare root-owned configuration
 
-Create the dedicated account before writing the configuration:
+Create the isolated scanner and public-webhook accounts before deployment:
 
 ```bash
 sudo useradd --system --home /var/lib/pokehunter --shell /usr/sbin/nologin pokehunter
+sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin pokehunter-web
 sudo install -d -o pokehunter -g pokehunter -m 0750 /var/lib/pokehunter
 ```
 
@@ -120,6 +121,8 @@ The script creates an immutable release under `/opt/pokehunter/releases/<commit>
 top-level dependencies into that release, validates the systemd units, runs both permission checks,
 and atomically switches `/opt/pokehunter/current`. It stops only the validated legacy PokéHunter
 unit and starts only `pokehunter-web.service`. The existing Caddy route and port remain unchanged.
+The public webhook and monitor run under different unprivileged accounts with bounded memory,
+task counts, and low CPU/I/O weights, so the scanner cannot contend aggressively with Hermes.
 The release must reproduce the legacy server's challenge hash for the same unique challenge,
 proving that the endpoint and verification token remained continuous; otherwise it rolls back.
 

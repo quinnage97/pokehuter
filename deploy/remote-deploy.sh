@@ -187,6 +187,9 @@ hermes_fingerprint >"${before_fingerprint}"
 if ! id pokehunter >/dev/null 2>&1; then
   useradd --system --home /var/lib/pokehunter --shell /usr/sbin/nologin pokehunter
 fi
+if ! id pokehunter-web >/dev/null 2>&1; then
+  useradd --system --home /nonexistent --shell /usr/sbin/nologin pokehunter-web
+fi
 install -d -o root -g root -m 0755 /opt/pokehunter /opt/pokehunter/releases
 install -d -o pokehunter -g pokehunter -m 0750 /var/lib/pokehunter
 
@@ -200,13 +203,17 @@ tar --extract --gzip --no-same-owner --no-same-permissions \
   --file "${ARTIFACT}" --directory "${release_dir}"
 chown -R pokehunter:pokehunter "${release_dir}"
 
-runuser -u pokehunter -- python3 -m venv "${release_dir}/.venv"
-runuser -u pokehunter -- env PIP_CONSTRAINT="${release_dir}/deploy/constraints.txt" \
+nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+  python3 -m venv "${release_dir}/.venv"
+nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+  env PIP_CONSTRAINT="${release_dir}/deploy/constraints.txt" \
   "${release_dir}/.venv/bin/pip" install \
   --disable-pip-version-check --require-virtualenv \
   --constraint "${release_dir}/deploy/constraints.txt" "${release_dir}"
-runuser -u pokehunter -- "${release_dir}/.venv/bin/pip" check
-runuser -u pokehunter -- "${release_dir}/.venv/bin/python" -m compileall -q \
+nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+  "${release_dir}/.venv/bin/pip" check
+nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+  "${release_dir}/.venv/bin/python" -m compileall -q \
   "${release_dir}/src"
 chown -R root:root "${release_dir}"
 

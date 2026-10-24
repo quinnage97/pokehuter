@@ -7,7 +7,7 @@ PUBLIC_URL="${POKEHUNTER_PUBLIC_URL:-https://pokehunter-nq.duckdns.org/ebay/dele
 echo "PokéHunter server preflight (read-only)"
 echo "host=$(hostname -f 2>/dev/null || hostname) port=${PORT}"
 
-for command in python3 systemctl systemd-analyze ss curl flock install runuser sha256sum tar useradd; do
+for command in python3 systemctl systemd-analyze ss curl flock install ionice nice runuser sha256sum tar useradd; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     echo "missing_command=${command}"
     exit 1

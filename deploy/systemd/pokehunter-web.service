@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pokehunter
-Group=pokehunter
+User=pokehunter-web
+Group=pokehunter-web
 WorkingDirectory=/opt/pokehunter/current
 EnvironmentFile=/etc/pokehunter.env
 Environment=PYTHONDONTWRITEBYTECODE=1
@@ -29,6 +29,16 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 CapabilityBoundingSet=
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CPUWeight=20
+IOWeight=20
+MemoryMax=256M
+TasksMax=64
+TimeoutStopSec=15s
 
 [Install]
 WantedBy=multi-user.target
