@@ -19,5 +19,6 @@ jobs:
           cache: pip
       - run: pip install -e '.[dev]'
       - run: ruff check .
+      - run: python -m compileall -q src deploy/*.py tests
       - run: bash -n deploy/*.sh
       - run: pytest --cov=pokehunter --cov-report=term-missing --cov-fail-under=80

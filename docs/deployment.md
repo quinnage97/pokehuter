@@ -35,6 +35,16 @@ Record the exact legacy systemd unit name; the apply script will refuse to stop 
 `ExecStart` identifies it as PokéHunter or `ebay_notifications.py`. If the listener cannot be tied
 to such a unit, stop and inspect it manually.
 
+Check the existing production keyset without installing software, writing server files, or showing
+credentials:
+
+```bash
+bash deploy/hetzner-deploy.sh probe-ebay <ssh-target>
+```
+
+This reads the legacy `/opt/pokehunter/.env` in memory and reports only OAuth/Browse HTTP status,
+the number of returned summaries, and whether the EPN campaign and delivery postcode are present.
+
 ## 2. Prepare root-owned configuration
 
 Create the dedicated account before writing the configuration:

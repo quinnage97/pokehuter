@@ -8,7 +8,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 ENABLE_MONITOR="${POKEHUNTER_ENABLE_MONITOR:-NO}"
 
 if [[ -z "${MODE}" || -z "${SSH_TARGET}" ]]; then
-  echo "usage: $0 preflight|apply <ssh-target> [legacy-unit.service]"
+  echo "usage: $0 preflight|probe-ebay|apply <ssh-target> [legacy-unit.service]"
   exit 2
 fi
 if [[ "${LEGACY_UNIT}" != "none" ]] \
@@ -24,6 +24,10 @@ fi
 case "${MODE}" in
   preflight)
     ssh "${SSH_TARGET}" 'sudo bash -s' <"${ROOT}/deploy/server-preflight.sh"
+    ;;
+  probe-ebay)
+    ssh "${SSH_TARGET}" 'sudo python3 - --env /opt/pokehunter/.env' \
+      <"${ROOT}/deploy/probe-existing-ebay.py"
     ;;
   apply)
     if [[ "${POKEHUNTER_DEPLOY_APPROVED:-}" != "YES" ]]; then
