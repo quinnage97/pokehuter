@@ -1,0 +1,25 @@
+[Unit]
+Description=PokéHunter eBay compliance webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pokehunter
+Group=pokehunter
+WorkingDirectory=/opt/pokehunter
+EnvironmentFile=/etc/pokehunter.env
+ExecStart=/opt/pokehunter/.venv/bin/pokehunter serve --host 127.0.0.1 --port 8088
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pokehunter
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
