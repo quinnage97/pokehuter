@@ -30,12 +30,11 @@ helpers=(
   purge-legacy-deletion-db.py validate-release.py authorize-release-root.sh
 )
 units=(pokehunter-web.service pokehunter-monitor.service pokehunter-monitor.timer)
-for source in "${SCRIPT_DIR}/pokehunter-control"; do
-  if [[ ! -f "${source}" || -L "${source}" ]]; then
-    echo "missing or unsafe bootstrap source: ${source}"
-    exit 1
-  fi
-done
+control_source="${SCRIPT_DIR}/pokehunter-control"
+if [[ ! -f "${control_source}" || -L "${control_source}" ]]; then
+  echo "missing or unsafe bootstrap source: ${control_source}"
+  exit 1
+fi
 for helper in "${helpers[@]}"; do
   source="${SCRIPT_DIR}/${helper}"
   if [[ ! -f "${source}" || -L "${source}" ]]; then
