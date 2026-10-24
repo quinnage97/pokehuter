@@ -7,7 +7,7 @@ from .models import Listing
 TARGET_PATTERN = re.compile(r"\b(charizard|mew)\b", re.IGNORECASE)
 EXCLUDED_PATTERN = re.compile(
     r"\b(proxy|replica|reprint|custom|digital|orica|fan[ -]?made|metal card|mystery|"
-    r"bundle|job lot|collection)\b",
+    r"bundle|job lot|lot|playset|collection)\b",
     re.IGNORECASE,
 )
 NON_ENGLISH_PATTERN = re.compile(

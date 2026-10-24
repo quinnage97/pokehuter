@@ -16,7 +16,10 @@ environment variable after reviewing a read-only preflight.
 - `apply` refuses to run unless `POKEHUNTER_DEPLOY_APPROVED=YES` is present and the local worktree
   is clean.
 - The monitor timer remains disabled unless the separate
-  `POKEHUNTER_ENABLE_MONITOR=YES` approval flag is present.
+  `POKEHUNTER_ENABLE_MONITOR=YES` approval flag is present on its first deployment. Later upgrades
+  preserve its existing state unless `YES` or `NO` is explicitly selected.
+- If the legacy deletion database exists, apply refuses to proceed unless the separate destructive
+  cleanup flag `POKEHUNTER_PURGE_LEGACY_DELETION_DB=YES` is present.
 - The deployment fingerprints Hermes-related units and containers before and after. Any change
   causes PokéHunter rollback.
 - Do not submit or modify the eBay Marketplace Account Deletion form as part of deployment.
@@ -34,6 +37,10 @@ Confirm that the output identifies the current legacy PokéHunter/eBay webhook s
 Record the exact legacy systemd unit name; the apply script will refuse to stop any unit unless its
 `ExecStart` identifies it as PokéHunter or `ebay_notifications.py`. If the listener cannot be tied
 to such a unit, stop and inspect it manually.
+
+The preflight also reports whether `/opt/pokehunter/data/ebay_deletions.sqlite3` exists. The legacy
+implementation stores eBay usernames and user IDs there. Unless there is a documented legal
+retention requirement, this personal data should be deleted at a separately approved cutover.
 
 Check the existing production keyset without installing software, writing server files, or showing
 credentials:
@@ -68,7 +75,7 @@ root-only source file, explicitly authorize the one-time write:
 sudo POKEHUNTER_CONFIG_MIGRATION_APPROVED=YES python3 deploy/migrate-config.py --write
 ```
 
-Alternatively create `/etc/pokehunter.env` manually as `root:pokehunter` with mode `0640`, using
+Alternatively create `/etc/pokehunter.env` manually as `root:root` with mode `0600`, using
 `.env.example` as the key list. Do not paste secrets into shell arguments, terminal output, Git, or
 this runbook. Required production values include:
 
@@ -78,7 +85,7 @@ this runbook. Required production values include:
 - Telegram bot token and target chat ID;
 - `DATABASE_PATH=/var/lib/pokehunter/pokehunter.sqlite3`;
 - the GB delivery postcode; and
-- the 10-digit EPN campaign ID if the application's production Browse access is tied to EPN.
+- the 10-digit EPN campaign ID required for production Browse use.
 
 ## 3. Permission checks
 
@@ -100,10 +107,12 @@ eBay approved this production bargain-ranking/alert use case or any required EPN
 ## 4. Approval-gated release
 
 Do not run this command until the owner explicitly approves deployment. Pass the exact legacy unit
-name found during preflight:
+name found during preflight. If preflight reports the legacy deletion database, the owner must also
+explicitly approve its irreversible deletion:
 
 ```bash
 POKEHUNTER_DEPLOY_APPROVED=YES \
+POKEHUNTER_PURGE_LEGACY_DELETION_DB=YES \
   bash deploy/hetzner-deploy.sh apply <ssh-target> <legacy-unit.service>
 ```
 
@@ -111,10 +120,16 @@ The script creates an immutable release under `/opt/pokehunter/releases/<commit>
 top-level dependencies into that release, validates the systemd units, runs both permission checks,
 and atomically switches `/opt/pokehunter/current`. It stops only the validated legacy PokéHunter
 unit and starts only `pokehunter-web.service`. The existing Caddy route and port remain unchanged.
+The release must reproduce the legacy server's challenge hash for the same unique challenge,
+proving that the endpoint and verification token remained continuous; otherwise it rolls back.
 
 After local and public webhook verification passes, the old unit is disabled. Any failure after
 activation restores the previous symlink and restarts the validated legacy unit. Release files are
-left in place for diagnosis; no broad cleanup or restart is performed.
+left in place for diagnosis; no broad cleanup or restart is performed. When separately approved,
+only the exact legacy SQLite database and its SQLite sidecar files are deleted after verification.
+The purge enables SQLite secure deletion, deletes the rows, vacuums the file, and then unlinks it.
+The operator must separately confirm that Hetzner snapshots or backups containing the legacy file
+are deleted or expire under an appropriate documented retention policy.
 
 ## 5. Separately enable scheduled monitoring
 

@@ -10,6 +10,7 @@ Group=pokehunter
 WorkingDirectory=/opt/pokehunter/current
 EnvironmentFile=/etc/pokehunter.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+UnsetEnvironment=EBAY_VERIFICATION_TOKEN
 ExecStart=/usr/bin/flock -n /var/lib/pokehunter/monitor.lock /opt/pokehunter/current/.venv/bin/pokehunter monitor
 NoNewPrivileges=true
 PrivateTmp=true

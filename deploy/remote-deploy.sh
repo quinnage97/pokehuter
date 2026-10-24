@@ -5,7 +5,9 @@ ARTIFACT="${1:?release artifact path is required}"
 RELEASE_ID="${2:?release identifier is required}"
 EXPECTED_SHA256="${3:?release SHA-256 is required}"
 LEGACY_UNIT="${4:-none}"
-ENABLE_MONITOR="${POKEHUNTER_ENABLE_MONITOR:-NO}"
+ENABLE_MONITOR="${POKEHUNTER_ENABLE_MONITOR:-UNCHANGED}"
+PURGE_LEGACY_DATA="${POKEHUNTER_PURGE_LEGACY_DELETION_DB:-NO}"
+LEGACY_DB="/opt/pokehunter/data/ebay_deletions.sqlite3"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "remote deployment must run as root"
@@ -32,8 +34,12 @@ if [[ ! "${EXPECTED_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
   echo "release artifact checksum mismatch"
   exit 1
 fi
-if [[ ! "${ENABLE_MONITOR}" =~ ^(YES|NO)$ ]]; then
-  echo "POKEHUNTER_ENABLE_MONITOR must be YES or NO"
+if [[ ! "${ENABLE_MONITOR}" =~ ^(YES|NO|UNCHANGED)$ ]]; then
+  echo "POKEHUNTER_ENABLE_MONITOR must be YES, NO, or UNCHANGED"
+  exit 1
+fi
+if [[ ! "${PURGE_LEGACY_DATA}" =~ ^(YES|NO)$ ]]; then
+  echo "POKEHUNTER_PURGE_LEGACY_DELETION_DB must be YES or NO"
   exit 1
 fi
 if [[ "${LEGACY_UNIT}" != "none" ]] \
@@ -56,6 +62,16 @@ tar --extract --gzip --to-stdout --file "${ARTIFACT}" deploy/server-preflight.sh
 bash "${preflight_script}"
 rm -f "${preflight_script}"
 
+public_challenge_hash() {
+  local challenge="$1"
+  curl --fail --silent --show-error --max-time 10 \
+    "https://pokehunter-nq.duckdns.org/ebay/deletion?challenge_code=${challenge}" \
+    | python3 -c \
+      'import json,sys; value=json.load(sys.stdin).get("challengeResponse", ""); assert len(value) == 64; int(value, 16); print(value)'
+}
+continuity_challenge="release-${RELEASE_ID}"
+legacy_challenge_hash="$(public_challenge_hash "${continuity_challenge}")"
+
 required_keys=(
   EBAY_CLIENT_ID EBAY_CLIENT_SECRET EBAY_DELETION_ENDPOINT EBAY_VERIFICATION_TOKEN
   EBAY_DELIVERY_POSTCODE EBAY_AFFILIATE_CAMPAIGN_ID TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
@@ -67,8 +83,8 @@ if [[ ! -r /etc/pokehunter.env ]]; then
 fi
 config_owner="$(stat -c '%U:%G' /etc/pokehunter.env)"
 config_mode="$(stat -c '%a' /etc/pokehunter.env)"
-if [[ "${config_owner}" != "root:pokehunter" || "${config_mode}" != "640" ]]; then
-  echo "invalid config ownership or mode; expected root:pokehunter 640"
+if [[ "${config_owner}" != "root:root" || "${config_mode}" != "600" ]]; then
+  echo "invalid config ownership or mode; expected root:root 600"
   exit 1
 fi
 for key in "${required_keys[@]}"; do
@@ -80,6 +96,25 @@ done
 if ! grep -Fqx 'EBAY_DELETION_ENDPOINT=https://pokehunter-nq.duckdns.org/ebay/deletion' \
   /etc/pokehunter.env; then
   echo "existing public webhook URL must be preserved"
+  exit 1
+fi
+if [[ -e "${LEGACY_DB}" && "${PURGE_LEGACY_DATA}" != "YES" ]]; then
+  echo "legacy deletion database contains eBay user data; explicit purge approval is required"
+  exit 1
+fi
+
+for unit in pokehunter-web.service pokehunter-monitor.service; do
+  unit_path="/etc/systemd/system/${unit}"
+  if [[ -e "${unit_path}" ]] \
+    && ! grep -Fq '/opt/pokehunter/current/.venv/bin/pokehunter' "${unit_path}"; then
+    echo "refusing to replace unrecognized unit ${unit}"
+    exit 1
+  fi
+done
+timer_path="/etc/systemd/system/pokehunter-monitor.timer"
+if [[ -e "${timer_path}" ]] \
+  && ! grep -Fq 'Unit=pokehunter-monitor.service' "${timer_path}"; then
+  echo "refusing to replace unrecognized unit pokehunter-monitor.timer"
   exit 1
 fi
 
@@ -95,7 +130,16 @@ hermes_fingerprint() {
 before_fingerprint="$(mktemp)"
 after_fingerprint="$(mktemp)"
 previous_target="$(readlink -f /opt/pokehunter/current 2>/dev/null || true)"
+previous_web_enabled=0
+previous_web_active=0
+previous_monitor_enabled=0
+previous_monitor_active=0
+systemctl is-enabled --quiet pokehunter-web.service 2>/dev/null && previous_web_enabled=1
+systemctl is-active --quiet pokehunter-web.service 2>/dev/null && previous_web_active=1
+systemctl is-enabled --quiet pokehunter-monitor.timer 2>/dev/null && previous_monitor_enabled=1
+systemctl is-active --quiet pokehunter-monitor.timer 2>/dev/null && previous_monitor_active=1
 legacy_stopped=0
+legacy_was_enabled=0
 activated=0
 
 cleanup() {
@@ -105,13 +149,32 @@ rollback() {
   status=$?
   if [[ "${status}" -ne 0 ]]; then
     if [[ "${activated}" -eq 1 ]]; then
-      systemctl stop pokehunter-web.service >/dev/null 2>&1 || true
+      systemctl disable --now pokehunter-monitor.timer >/dev/null 2>&1 || true
+      systemctl disable --now pokehunter-web.service >/dev/null 2>&1 || true
       if [[ -n "${previous_target}" && -d "${previous_target}" ]]; then
         ln -sfn "${previous_target}" /opt/pokehunter/current.rollback
         mv -Tf /opt/pokehunter/current.rollback /opt/pokehunter/current
+      else
+        rm -f /opt/pokehunter/current || true
+      fi
+      systemctl daemon-reload >/dev/null 2>&1 || true
+      if [[ "${previous_web_active}" -eq 1 ]]; then
+        systemctl start pokehunter-web.service >/dev/null 2>&1 || true
+      fi
+      if [[ "${previous_web_enabled}" -eq 1 ]]; then
+        systemctl enable pokehunter-web.service >/dev/null 2>&1 || true
+      fi
+      if [[ "${previous_monitor_enabled}" -eq 1 ]]; then
+        systemctl enable pokehunter-monitor.timer >/dev/null 2>&1 || true
+      fi
+      if [[ "${previous_monitor_active}" -eq 1 ]]; then
+        systemctl start pokehunter-monitor.timer >/dev/null 2>&1 || true
       fi
     fi
     if [[ "${legacy_stopped}" -eq 1 ]]; then
+      if [[ "${legacy_was_enabled}" -eq 1 ]]; then
+        systemctl enable "${LEGACY_UNIT}" >/dev/null 2>&1 || true
+      fi
       systemctl start "${LEGACY_UNIT}" >/dev/null 2>&1 || true
     fi
   fi
@@ -133,24 +196,27 @@ if [[ -e "${release_dir}" ]]; then
   exit 1
 fi
 install -d -o pokehunter -g pokehunter -m 0755 "${release_dir}"
-tar --extract --gzip --file "${ARTIFACT}" --directory "${release_dir}"
+tar --extract --gzip --no-same-owner --no-same-permissions \
+  --file "${ARTIFACT}" --directory "${release_dir}"
 chown -R pokehunter:pokehunter "${release_dir}"
 
 runuser -u pokehunter -- python3 -m venv "${release_dir}/.venv"
-runuser -u pokehunter -- "${release_dir}/.venv/bin/pip" install \
+runuser -u pokehunter -- env PIP_CONSTRAINT="${release_dir}/deploy/constraints.txt" \
+  "${release_dir}/.venv/bin/pip" install \
   --disable-pip-version-check --require-virtualenv \
   --constraint "${release_dir}/deploy/constraints.txt" "${release_dir}"
+runuser -u pokehunter -- "${release_dir}/.venv/bin/pip" check
 runuser -u pokehunter -- "${release_dir}/.venv/bin/python" -m compileall -q \
   "${release_dir}/src"
 chown -R root:root "${release_dir}"
 
 # Probe OAuth and Browse permissions before changing the live service. Values remain inside the
 # root-owned EnvironmentFile and are never printed or passed on the command line.
-runuser -u pokehunter -- /bin/bash -c \
-  'set -a; source /etc/pokehunter.env; set +a; exec "$1" check-ebay' \
+/bin/bash -c \
+  'set -a; source /etc/pokehunter.env; set +a; exec runuser -u pokehunter --preserve-environment -- "$1" check-ebay' \
   bash "${release_dir}/.venv/bin/pokehunter"
-runuser -u pokehunter -- /bin/bash -c \
-  'set -a; source /etc/pokehunter.env; set +a; exec "$1" check-telegram' \
+/bin/bash -c \
+  'set -a; source /etc/pokehunter.env; set +a; exec runuser -u pokehunter --preserve-environment -- "$1" check-telegram' \
   bash "${release_dir}/.venv/bin/pokehunter"
 
 install -o root -g root -m 0644 \
@@ -159,6 +225,10 @@ install -o root -g root -m 0644 \
   "${release_dir}/deploy/systemd/pokehunter-monitor.service" /etc/systemd/system/
 install -o root -g root -m 0644 \
   "${release_dir}/deploy/systemd/pokehunter-monitor.timer" /etc/systemd/system/
+
+ln -sfn "${release_dir}" /opt/pokehunter/current.next
+mv -Tf /opt/pokehunter/current.next /opt/pokehunter/current
+activated=1
 systemd-analyze verify /etc/systemd/system/pokehunter-web.service \
   /etc/systemd/system/pokehunter-monitor.service \
   /etc/systemd/system/pokehunter-monitor.timer
@@ -178,6 +248,7 @@ if [[ "${LEGACY_UNIT}" != "none" ]]; then
     echo "legacy unit does not own the port 8765 listener"
     exit 1
   fi
+  systemctl is-enabled --quiet "${LEGACY_UNIT}" 2>/dev/null && legacy_was_enabled=1
   systemctl stop "${LEGACY_UNIT}"
   legacy_stopped=1
 else
@@ -187,20 +258,23 @@ else
   fi
 fi
 
-ln -sfn "${release_dir}" /opt/pokehunter/current.next
-mv -Tf /opt/pokehunter/current.next /opt/pokehunter/current
-activated=1
 systemctl daemon-reload
 systemctl enable --now pokehunter-web.service
 
 if [[ "${ENABLE_MONITOR}" == "YES" ]]; then
   systemctl enable --now pokehunter-monitor.timer
-else
+elif [[ "${ENABLE_MONITOR}" == "NO" ]]; then
   systemctl disable --now pokehunter-monitor.timer >/dev/null 2>&1 || true
-  echo "monitor_timer=disabled_pending_separate_approval"
+else
+  echo "monitor_timer=unchanged"
 fi
 
 bash "${release_dir}/deploy/verify-release.sh" "${RELEASE_ID}"
+replacement_challenge_hash="$(public_challenge_hash "${continuity_challenge}")"
+if [[ "${replacement_challenge_hash}" != "${legacy_challenge_hash}" ]]; then
+  echo "webhook challenge response changed; rolling back PokéHunter"
+  exit 1
+fi
 hermes_fingerprint >"${after_fingerprint}"
 if ! cmp -s "${before_fingerprint}" "${after_fingerprint}"; then
   echo "Hermes fingerprint changed; rolling back PokéHunter"
@@ -208,7 +282,10 @@ if ! cmp -s "${before_fingerprint}" "${after_fingerprint}"; then
 fi
 
 if [[ "${legacy_stopped}" -eq 1 ]]; then
-  systemctl disable "${LEGACY_UNIT}" >/dev/null 2>&1 || true
+  systemctl disable "${LEGACY_UNIT}"
+fi
+if [[ "${PURGE_LEGACY_DATA}" == "YES" ]]; then
+  python3 "${release_dir}/deploy/purge-legacy-deletion-db.py"
 fi
 
 activated=0

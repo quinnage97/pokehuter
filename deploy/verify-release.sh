@@ -11,14 +11,35 @@ if [[ "${CURRENT}" != "/opt/pokehunter/releases/${EXPECTED_RELEASE}" ]]; then
 fi
 
 systemctl is-active --quiet pokehunter-web.service
-curl --fail --silent --max-time 5 http://127.0.0.1:8765/healthz \
-  | grep -Fq '"status":"ok"'
+local_body="$(mktemp)"
+public_body="$(mktemp)"
+trap 'rm -f "${local_body}" "${public_body}"' EXIT
 
-status="$(curl --silent --show-error --output /tmp/pokehunter-verify-body.$$ \
-  --write-out '%{http_code}' --max-time 10 "${PUBLIC_URL}?challenge_code=release-verification" || true)"
-trap 'rm -f /tmp/pokehunter-verify-body.$$' EXIT
-[[ "${status}" == "200" ]]
-grep -Eq '^\{"challengeResponse"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"\}$' \
-  /tmp/pokehunter-verify-body.$$
+local_healthy=0
+for _ in {1..10}; do
+  if curl --fail --silent --max-time 5 --output "${local_body}" \
+    http://127.0.0.1:8765/healthz \
+    && grep -Fq '"status":"ok"' "${local_body}"; then
+    local_healthy=1
+    break
+  fi
+  sleep 1
+done
+[[ "${local_healthy}" -eq 1 ]]
+
+public_healthy=0
+for _ in {1..10}; do
+  status="$(curl --silent --show-error --output "${public_body}" \
+    --write-out '%{http_code}' --max-time 10 \
+    "${PUBLIC_URL}?challenge_code=release-verification" || true)"
+  if [[ "${status}" == "200" ]] \
+    && grep -Eq '^\{"challengeResponse"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"\}$' \
+      "${public_body}"; then
+    public_healthy=1
+    break
+  fi
+  sleep 1
+done
+[[ "${public_healthy}" -eq 1 ]]
 
 echo "release_verification=passed"

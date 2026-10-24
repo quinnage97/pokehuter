@@ -7,12 +7,27 @@ PUBLIC_URL="${POKEHUNTER_PUBLIC_URL:-https://pokehunter-nq.duckdns.org/ebay/dele
 echo "PokéHunter server preflight (read-only)"
 echo "host=$(hostname -f 2>/dev/null || hostname) port=${PORT}"
 
-for command in python3 systemctl systemd-analyze ss curl flock sha256sum; do
+for command in python3 systemctl systemd-analyze ss curl flock install runuser sha256sum tar useradd; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     echo "missing_command=${command}"
     exit 1
   fi
 done
+
+if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
+  echo "python_3_11_or_newer=required"
+  exit 1
+fi
+if ! python3 -m venv --help >/dev/null 2>&1; then
+  echo "python_venv=unavailable"
+  exit 1
+fi
+available_kib="$(df -Pk /opt | awk 'NR == 2 {print $4}')"
+if [[ ! "${available_kib}" =~ ^[0-9]+$ || "${available_kib}" -lt 524288 ]]; then
+  echo "disk_space=insufficient"
+  exit 1
+fi
+echo "disk_available_kib=${available_kib}"
 
 echo "os=$(awk -F= '$1 == "PRETTY_NAME" {gsub(/\"/, "", $2); print $2}' /etc/os-release)"
 echo "python=$(python3 --version 2>&1)"
@@ -48,6 +63,12 @@ else
   echo "app_path=absent"
 fi
 
+if [[ -e /opt/pokehunter/data/ebay_deletions.sqlite3 ]]; then
+  echo "legacy_deletion_database=present bytes=$(stat -c '%s' /opt/pokehunter/data/ebay_deletions.sqlite3)"
+else
+  echo "legacy_deletion_database=absent"
+fi
+
 if [[ -r /etc/pokehunter.env ]]; then
   mode="$(stat -c '%a' /etc/pokehunter.env)"
   echo "config=present mode=${mode} keys:"
@@ -56,12 +77,13 @@ else
   echo "config=absent"
 fi
 
-status="$(curl --silent --show-error --output /tmp/pokehunter-preflight-body.$$ \
+body_file="$(mktemp)"
+trap 'rm -f "${body_file}"' EXIT
+status="$(curl --silent --show-error --output "${body_file}" \
   --write-out '%{http_code}' --max-time 10 "${PUBLIC_URL}?challenge_code=deployment-preflight" || true)"
-trap 'rm -f /tmp/pokehunter-preflight-body.$$' EXIT
 if [[ "${status}" == "200" ]] \
   && grep -Eq '^\{"challengeResponse"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"\}$' \
-    /tmp/pokehunter-preflight-body.$$; then
+    "${body_file}"; then
   echo "public_webhook=healthy"
 else
   echo "public_webhook=unexpected_status_${status}"

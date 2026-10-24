@@ -23,6 +23,27 @@ MAX_NOTIFICATION_BYTES = 64 * 1024
 MAX_SIGNATURE_HEADER_BYTES = 4096
 
 
+async def read_limited_body(request: Request) -> bytes:
+    """Read a request body without buffering an unbounded chunked upload."""
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_size = int(declared)
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail="Invalid notification size") from exc
+        if declared_size < 1 or declared_size > MAX_NOTIFICATION_BYTES:
+            raise HTTPException(status_code=413, detail="Invalid notification size")
+
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_NOTIFICATION_BYTES:
+            raise HTTPException(status_code=413, detail="Invalid notification size")
+        body.extend(chunk)
+    if not body:
+        raise HTTPException(status_code=413, detail="Invalid notification size")
+    return bytes(body)
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -77,9 +98,7 @@ def create_app(
             raise HTTPException(status_code=412, detail="Missing notification signature")
         if len(x_ebay_signature.encode("utf-8")) > MAX_SIGNATURE_HEADER_BYTES:
             raise HTTPException(status_code=412, detail="Invalid notification signature")
-        body = await request.body()
-        if not body or len(body) > MAX_NOTIFICATION_BYTES:
-            raise HTTPException(status_code=413, detail="Invalid notification size")
+        body = await read_limited_body(request)
         try:
             payload = parse_json_body(body)
             notification_id = validate_deletion_payload(payload)

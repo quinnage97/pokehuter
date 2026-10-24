@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from functools import cached_property
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -84,8 +85,16 @@ class Settings(BaseSettings):
         return self.telegram_bot_token.get_secret_value(), self.telegram_chat_id
 
     def require_webhook_config(self) -> tuple[str, str]:
-        if not self.ebay_deletion_endpoint or not self.ebay_deletion_endpoint.startswith(
-            "https://"
+        endpoint = self.ebay_deletion_endpoint or ""
+        parsed = urlsplit(endpoint)
+        if (
+            endpoint != endpoint.strip()
+            or parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
         ):
             raise ValueError("EBAY_DELETION_ENDPOINT must be the public HTTPS webhook URL")
         if not self.ebay_verification_token:
@@ -95,4 +104,4 @@ class Settings(BaseSettings):
             raise ValueError(
                 "EBAY_VERIFICATION_TOKEN must be 32-80 letters, numbers, underscores or hyphens"
             )
-        return self.ebay_deletion_endpoint, token
+        return endpoint, token

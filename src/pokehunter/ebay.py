@@ -5,6 +5,7 @@ import base64
 import json
 import re
 import time
+from collections import deque
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -35,6 +36,8 @@ class EbayClient:
         self._token: _AccessToken | None = None
         self._token_lock = asyncio.Lock()
         self._public_keys: dict[str, tuple[str, float]] = {}
+        self._public_key_lock = asyncio.Lock()
+        self._public_key_fetches: deque[float] = deque()
 
     async def application_token(self) -> str:
         now = time.monotonic()
@@ -119,22 +122,40 @@ class EbayClient:
         cached = self._public_keys.get(key_id)
         if cached and cached[1] > now:
             return cached[0]
-        token = await self.application_token()
-        response = await self.http.get(
-            f"{self.settings.ebay_api_base}/commerce/notification/v1/public_key/"
-            f"{quote(key_id, safe='')}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
-        if response.is_error:
-            raise EbayApiError(f"eBay public-key retrieval failed with HTTP {response.status_code}")
-        key = response.json().get("key")
-        if not isinstance(key, str) or "PUBLIC KEY" not in key:
-            raise EbayApiError("eBay returned an invalid public key")
-        self._public_keys[key_id] = (
-            key,
-            now + self.settings.public_key_cache_seconds,
-        )
-        return key
+        async with self._public_key_lock:
+            now = time.monotonic()
+            cached = self._public_keys.get(key_id)
+            if cached and cached[1] > now:
+                return cached[0]
+            while self._public_key_fetches and self._public_key_fetches[0] <= now - 60:
+                self._public_key_fetches.popleft()
+            if len(self._public_key_fetches) >= 20:
+                raise EbayApiError("eBay public-key retrieval is temporarily rate limited")
+            self._public_key_fetches.append(now)
+            token = await self.application_token()
+            response = await self.http.get(
+                f"{self.settings.ebay_api_base}/commerce/notification/v1/public_key/"
+                f"{quote(key_id, safe='')}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            )
+            if response.is_error:
+                raise EbayApiError(
+                    f"eBay public-key retrieval failed with HTTP {response.status_code}"
+                )
+            key = response.json().get("key")
+            if not isinstance(key, str) or "PUBLIC KEY" not in key:
+                raise EbayApiError("eBay returned an invalid public key")
+            if len(self._public_keys) >= 32:
+                expired = [kid for kid, (_, expiry) in self._public_keys.items() if expiry <= now]
+                for kid in expired:
+                    self._public_keys.pop(kid, None)
+                while len(self._public_keys) >= 32:
+                    self._public_keys.pop(next(iter(self._public_keys)))
+            self._public_keys[key_id] = (
+                key,
+                now + self.settings.public_key_cache_seconds,
+            )
+            return key
 
 
 def _money(value: Any) -> Decimal | None:
@@ -151,7 +172,13 @@ def parse_listing(item: dict[str, Any]) -> Listing | None:
     item_id = item.get("itemId")
     title = item.get("title")
     url = item.get("itemAffiliateWebUrl") or item.get("itemWebUrl")
-    if not all((item_id, title, url, currency)) or item_price is None:
+    buying_options = tuple(str(option) for option in item.get("buyingOptions") or ())
+    if (
+        not all((item_id, title, url, currency))
+        or item_price is None
+        or item_price <= 0
+        or "FIXED_PRICE" not in buying_options
+    ):
         return None
 
     shipping_costs: list[Decimal] = []
@@ -189,7 +216,7 @@ def parse_listing(item: dict[str, Any]) -> Listing | None:
         item_price=item_price,
         shipping_price=shipping,
         currency=str(currency),
-        buying_options=tuple(str(option) for option in item.get("buyingOptions") or ()),
+        buying_options=buying_options,
         condition=item.get("condition"),
         aspects=aspects,
     )

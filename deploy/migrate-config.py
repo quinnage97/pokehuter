@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import grp
 import os
 import re
 import shlex
@@ -104,18 +103,28 @@ def main() -> int:
             print("refusing multiline configuration value")
             return 1
 
+    temporary = args.output.with_name(f".{args.output.name}.{os.getpid()}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        pokehunter_gid = grp.getgrnam("pokehunter").gr_gid
-    except KeyError:
-        print("missing pokehunter system group")
-        return 1
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    descriptor = os.open(args.output, flags, 0o640)
-    with os.fdopen(descriptor, "w") as output:
-        for key, value in migrated.items():
-            output.write(f"{key}={shlex.quote(value)}\n")
-    os.chown(args.output, 0, pokehunter_gid)
-    os.chmod(args.output, 0o640)
+        with os.fdopen(descriptor, "w") as output:
+            for key, value in migrated.items():
+                output.write(f"{key}={shlex.quote(value)}\n")
+            output.flush()
+            os.fsync(output.fileno())
+            os.fchown(output.fileno(), 0, 0)
+            os.fchmod(output.fileno(), 0o600)
+        try:
+            os.link(temporary, args.output)
+        except FileExistsError:
+            print("refusing to overwrite existing configuration")
+            return 1
+        directory = os.open(args.output.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
     print(f"config_written={args.output}")
     return 0
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import time
 
 import httpx
 
@@ -79,6 +80,7 @@ def test_search_and_public_key_use_oauth_and_cache(settings):
                             "title": "English Mew Pokemon Card",
                             "itemWebUrl": "https://example.com/1",
                             "price": {"value": "20", "currency": "GBP"},
+                            "buyingOptions": ["FIXED_PRICE"],
                             "shippingOptions": [
                                 {"shippingCost": {"value": "0", "currency": "GBP"}}
                             ],
@@ -121,6 +123,7 @@ def test_parse_listing_rejects_unknown_or_wrong_currency_shipping():
         "title": "English Mew Pokemon Card",
         "itemWebUrl": "https://example.com/1",
         "price": {"value": "20", "currency": "GBP"},
+        "buyingOptions": ["FIXED_PRICE"],
     }
     assert parse_listing(common) is None
     assert (
@@ -128,6 +131,28 @@ def test_parse_listing_rejects_unknown_or_wrong_currency_shipping():
             {
                 **common,
                 "shippingOptions": [{"shippingCost": {"value": "5", "currency": "USD"}}],
+            }
+        )
+        is None
+    )
+
+
+def test_parse_listing_rejects_non_fixed_price_and_non_positive_price():
+    common = {
+        "itemId": "1",
+        "title": "English Charizard Pokemon Card",
+        "itemWebUrl": "https://example.com/1",
+        "price": {"value": "20", "currency": "GBP"},
+        "buyingOptions": ["FIXED_PRICE"],
+        "shippingOptions": [{"shippingCost": {"value": "0", "currency": "GBP"}}],
+    }
+    assert parse_listing({**common, "buyingOptions": ["AUCTION"]}) is None
+    assert (
+        parse_listing(
+            {
+                **common,
+                "buyingOptions": ["FIXED_PRICE"],
+                "price": {"value": "0", "currency": "GBP"},
             }
         )
         is None
@@ -160,5 +185,25 @@ def test_oauth_error_hides_response_body(settings):
                 assert "secret body" not in str(exc)
             else:
                 raise AssertionError("OAuth failure was accepted")
+
+    asyncio.run(run())
+
+
+def test_public_key_fetches_are_rate_limited(settings):
+    async def run():
+        transport = httpx.MockTransport(
+            lambda request: (_ for _ in ()).throw(
+                AssertionError("rate-limited lookup reached the network")
+            )
+        )
+        async with httpx.AsyncClient(transport=transport) as http:
+            client = EbayClient(settings, http)
+            client._public_key_fetches.extend([time.monotonic()] * 20)
+            try:
+                await client.get_public_key("new-key")
+            except EbayApiError as exc:
+                assert "rate limited" in str(exc)
+                return
+        raise AssertionError("public-key rate limit was not enforced")
 
     asyncio.run(run())

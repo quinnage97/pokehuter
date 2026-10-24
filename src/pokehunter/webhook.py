@@ -33,11 +33,11 @@ class EbaySignatureVerifier:
 
     async def verify(self, body: bytes, signature_header: str) -> bool:
         header = decode_signature_header(signature_header)
-        public_key_pem = await self.ebay.get_public_key(header["kid"])
         try:
             signature = base64.b64decode(header["signature"], validate=True)
             if not signature or len(signature) > 512:
                 return False
+            public_key_pem = await self.ebay.get_public_key(header["kid"])
             key = serialization.load_pem_public_key(public_key_pem.replace("\\n", "\n").encode())
             if not isinstance(key, ec.EllipticCurvePublicKey):
                 return False

@@ -13,6 +13,25 @@ def test_webhook_config_requires_exact_https_url():
         settings.require_webhook_config()
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://user:password@example.com/hook",
+        "https://example.com/hook?secret=value",
+        "https://example.com/hook#fragment",
+        " https://example.com/hook",
+    ],
+)
+def test_webhook_config_rejects_ambiguous_urls(endpoint):
+    settings = Settings(
+        _env_file=None,
+        ebay_deletion_endpoint=endpoint,
+        ebay_verification_token="a" * 32,
+    )
+    with pytest.raises(ValueError, match="HTTPS"):
+        settings.require_webhook_config()
+
+
 def test_webhook_token_rejects_invalid_characters():
     settings = Settings(
         _env_file=None,

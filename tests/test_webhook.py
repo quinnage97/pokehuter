@@ -129,6 +129,19 @@ def test_oversized_signature_header_is_rejected_before_verification(settings):
     assert response.status_code == 412
 
 
+def test_oversized_notification_body_is_rejected(settings):
+    response = asyncio.run(
+        asgi_request(
+            create_app(settings, verifier=AcceptingVerifier()),
+            "POST",
+            "/ebay/deletion",
+            content=b"x" * (64 * 1024 + 1),
+            headers={"Content-Type": "application/json", "X-EBAY-SIGNATURE": "valid"},
+        )
+    )
+    assert response.status_code == 413
+
+
 def test_signature_verifier_validates_raw_and_canonical_body():
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_pem = (
@@ -154,6 +167,18 @@ def test_signature_verifier_validates_raw_and_canonical_body():
         asyncio.run(verifier.verify(body.replace(b"notification-1", b"notification-2"), header))
         is False
     )
+
+
+def test_invalid_inner_signature_is_rejected_without_key_lookup():
+    header = base64.b64encode(json.dumps({"kid": "key-1", "signature": "***"}).encode()).decode()
+
+    class FakeEbay:
+        async def get_public_key(self, key_id: str) -> str:
+            raise AssertionError("invalid signature triggered a public-key request")
+
+    verifier = EbaySignatureVerifier(FakeEbay())  # type: ignore[arg-type]
+    body = json.dumps(payload(), separators=(",", ":")).encode()
+    assert asyncio.run(verifier.verify(body, header)) is False
 
 
 def test_challenge_response_is_deterministic():
