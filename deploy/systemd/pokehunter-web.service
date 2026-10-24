@@ -10,6 +10,8 @@ Group=pokehunter-web
 WorkingDirectory=/opt/pokehunter/current
 EnvironmentFile=/etc/pokehunter.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+UnsetEnvironment=EBAY_CLIENT_ID EBAY_CLIENT_SECRET EBAY_AFFILIATE_CAMPAIGN_ID
+UnsetEnvironment=EBAY_AFFILIATE_REFERENCE_ID EBAY_DELIVERY_POSTCODE EBAY_SEARCH_QUERIES
 UnsetEnvironment=TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID DATABASE_PATH
 ExecStart=/opt/pokehunter/current/.venv/bin/pokehunter serve --host 127.0.0.1 --port 8765
 Restart=on-failure

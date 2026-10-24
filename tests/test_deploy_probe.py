@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def load_probe():
     path = Path(__file__).parents[1] / "deploy" / "probe-existing-ebay.py"
@@ -24,6 +26,7 @@ def test_existing_ebay_probe_reports_only_safe_metadata(tmp_path, monkeypatch, c
         "EBAY_AFFILIATE_CAMPAIGN_ID=1234567890\n"
         "EBAY_DELIVERY_POSTCODE='SW1A 1AA'\n"
     )
+    env_file.chmod(0o600)
     responses = iter(
         [
             (200, {"access_token": "never-print-token"}),
@@ -61,6 +64,7 @@ def test_existing_ebay_probe_fails_closed_without_production_context(tmp_path, m
     probe = load_probe()
     env_file = tmp_path / ".env"
     env_file.write_text("EBAY_CLIENT_ID=client-id\nEBAY_CLIENT_SECRET=client-secret\n")
+    env_file.chmod(0o600)
     monkeypatch.setattr(sys, "argv", ["probe-existing-ebay.py", "--env", str(env_file)])
     for key in (
         "EBAY_CLIENT_ID",
@@ -76,3 +80,30 @@ def test_existing_ebay_probe_fails_closed_without_production_context(tmp_path, m
         "stage": "configuration",
         "affiliate_or_postcode_invalid": True,
     }
+
+
+def test_existing_ebay_probe_ignores_inherited_credentials(tmp_path, monkeypatch, capsys):
+    probe = load_probe()
+    env_file = tmp_path / ".env"
+    env_file.write_text("EBAY_CLIENT_ID=file-client\n")
+    env_file.chmod(0o600)
+    monkeypatch.setenv("EBAY_CLIENT_SECRET", "inherited-secret-must-not-be-used")
+    monkeypatch.setattr(sys, "argv", ["probe-existing-ebay.py", "--env", str(env_file)])
+
+    assert probe.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "error",
+        "stage": "configuration",
+        "missing_credentials": True,
+    }
+
+
+def test_existing_ebay_probe_rejects_symlink_environment(tmp_path):
+    probe = load_probe()
+    target = tmp_path / "target.env"
+    target.write_text("EBAY_CLIENT_ID=client\n")
+    symlink = tmp_path / "linked.env"
+    symlink.symlink_to(target)
+
+    with pytest.raises(OSError):
+        probe.read_env(symlink)

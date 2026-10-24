@@ -65,3 +65,16 @@ def test_legacy_purge_refuses_database_with_unrelated_table(tmp_path):
     finally:
         connection.close()
     assert value == ("preserve-me",)
+
+
+def test_legacy_purge_rejects_symlink_database(tmp_path):
+    purge = load_purge()
+    target = tmp_path / "target.sqlite3"
+    sqlite3.connect(target).close()
+    symlink = tmp_path / "ebay_deletions.sqlite3"
+    symlink.symlink_to(target)
+
+    with pytest.raises(RuntimeError, match="controlled regular file"):
+        purge.purge_database(symlink)
+
+    assert target.exists()

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Read-only eBay OAuth/Browse probe for the legacy server configuration."""
 
 from __future__ import annotations
@@ -9,39 +9,74 @@ import json
 import os
 import re
 import shlex
+import stat
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+MAX_ENV_BYTES = 64 * 1024
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+DIRECT_OPENER = build_opener(ProxyHandler({}), NoRedirectHandler())
 
 
 def read_env(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
-    if path.is_file():
-        for raw_line in path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, raw_value = line.split("=", 1)
-            try:
-                parsed = shlex.split(raw_value, comments=False, posix=True)
-            except ValueError:
-                continue
-            if len(parsed) == 1:
-                values[key.strip()] = parsed[0]
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("legacy environment is not a regular file")
+        if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise ValueError(
+                "legacy environment must be owned by the effective user with mode 0600"
+            )
+        if metadata.st_size > MAX_ENV_BYTES:
+            raise ValueError("legacy environment is too large")
+        with os.fdopen(descriptor, encoding="utf-8", errors="strict") as source:
+            descriptor = -1
+            contents = source.read(MAX_ENV_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(contents.encode("utf-8")) > MAX_ENV_BYTES:
+        raise ValueError("legacy environment is too large")
+    for raw_line in contents.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
+            continue
+        try:
+            parsed = shlex.split(raw_value, comments=False, posix=True)
+        except ValueError:
+            continue
+        if len(parsed) == 1:
+            values[key] = parsed[0]
     return values
 
 
 def first(values: dict[str, str], *keys: str) -> str:
-    return next((os.environ[key] for key in keys if os.environ.get(key)), "") or next(
-        (values[key] for key in keys if values.get(key)), ""
-    )
+    return next((values[key] for key in keys if values.get(key)), "")
 
 
 def request_json(request: Request) -> tuple[int, dict]:
     try:
-        with urlopen(request, timeout=15) as response:
-            return response.status, json.load(response)
+        with DIRECT_OPENER.open(request, timeout=15) as response:
+            body = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise ValueError("eBay response is too large")
+            decoded = json.loads(body)
+            return response.status, decoded if isinstance(decoded, dict) else {}
     except HTTPError as exc:
         return exc.code, {}
 
@@ -50,7 +85,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env", type=Path, default=Path("/opt/pokehunter/.env"))
     args = parser.parse_args()
-    values = read_env(args.env)
+    try:
+        values = read_env(args.env)
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "stage": "configuration",
+                    "error_type": type(exc).__name__,
+                },
+                separators=(",", ":"),
+            )
+        )
+        return 1
     client_id = first(values, "EBAY_CLIENT_ID", "EBAY_APP_ID", "EBAY_CLIENTID")
     client_secret = first(values, "EBAY_CLIENT_SECRET", "EBAY_CERT_ID", "EBAY_CLIENTSECRET")
     campaign_id = first(values, "EBAY_AFFILIATE_CAMPAIGN_ID")

@@ -1,13 +1,20 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -Eeuo pipefail
+umask 077
+export HOME=/root
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export TMPDIR=/tmp
 
-PORT="${POKEHUNTER_PORT:-8765}"
-PUBLIC_URL="${POKEHUNTER_PUBLIC_URL:-https://pokehunter-nq.duckdns.org/ebay/deletion}"
+readonly PORT="8765"
+readonly PUBLIC_URL="https://pokehunter-nq.duckdns.org/ebay/deletion"
 
 echo "PokéHunter server preflight (read-only)"
 echo "host=$(hostname -f 2>/dev/null || hostname) port=${PORT}"
 
-for command in python3 systemctl systemd-analyze ss curl flock install ionice nice runuser sha256sum tar useradd; do
+for command in python3 systemctl systemd-analyze ss curl env flock install ionice nice pgrep \
+  pkill runuser sha256sum tar useradd; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     echo "missing_command=${command}"
     exit 1
@@ -63,17 +70,18 @@ else
   echo "legacy_deletion_database=absent-or-not-visible"
 fi
 
-if [[ -r /etc/pokehunter.env ]]; then
+if [[ -f /etc/pokehunter.env && ! -L /etc/pokehunter.env ]] \
+  && [[ "$(stat -c '%U:%G' /etc/pokehunter.env)" == "root:root" ]]; then
   mode="$(stat -c '%a' /etc/pokehunter.env)"
   echo "config=present mode=${mode} keys:"
   sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' /etc/pokehunter.env | sort -u
 else
-  echo "config=absent-or-not-readable"
+  echo "config=absent-or-not-a-root-owned-regular-file"
 fi
 
 body_file="$(mktemp)"
 trap 'rm -f "${body_file}"' EXIT
-status="$(curl --silent --show-error --output "${body_file}" \
+status="$(curl --disable --silent --show-error --output "${body_file}" \
   --write-out '%{http_code}' --max-time 10 "${PUBLIC_URL}?challenge_code=deployment-preflight" || true)"
 if [[ "${status}" == "200" ]] \
   && grep -Eq '^\{"challengeResponse"[[:space:]]*:[[:space:]]*"[0-9a-f]{64}"\}$' \

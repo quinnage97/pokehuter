@@ -11,8 +11,9 @@ environment variable after reviewing a read-only preflight.
 The SSH identity is installed only for a dedicated `pokehunter-deploy` account. Do not add this
 account to `sudo`, `adm`, `docker`, `lxd`, or any application group. Its standing elevation is
 limited to two exact root-owned `/usr/local/sbin/pokehunter-control` commands: read-only preflight
-and the read-only eBay permission probe. The dispatcher does not accept shell commands,
-environment assignments, arbitrary paths, or arbitrary programs.
+and the read-only eBay permission probe. Both are tagged `NOSETENV`; the Python dispatcher also
+replaces the entire environment before executing a validated root-owned helper. It does not accept
+shell commands, arbitrary paths, or arbitrary programs.
 
 ## Safety and approval boundaries
 
@@ -55,20 +56,22 @@ webhook. Fields requiring root access are reported as unavailable. It never read
 
 Do not run the bootstrap merely to perform the initial read-only preflight. After its exact commit
 has been reviewed and the owner explicitly approves this server change, a current administrator
-may run from a root-controlled copy of the release:
+may run it from a root-owned copy beneath a root-owned, non-group/world-writable path. The script
+refuses sources that are symlinks, non-regular, non-root-owned, or group/world-writable:
 
 ```bash
 sudo POKEHUNTER_BOOTSTRAP_APPROVED=YES bash deploy/bootstrap-root.sh
 ```
 
-The bootstrap creates the two unprivileged runtime accounts, installs root-owned helpers under
+The bootstrap creates two unprivileged runtime accounts and a separate non-login build account,
+installs root-owned helpers under
 `/usr/local/libexec/pokehunter`, installs the three fixed PokéHunter units without enabling,
 starting, or reloading systemd, and validates `/etc/sudoers.d/pokehunter-deploy`. Its complete
 standing sudo policy is:
 
 ```text
-pokehunter-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control preflight
-pokehunter-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control probe-ebay
+pokehunter-deploy ALL=(root) NOPASSWD:NOSETENV: /usr/local/sbin/pokehunter-control preflight
+pokehunter-deploy ALL=(root) NOPASSWD:NOSETENV: /usr/local/sbin/pokehunter-control probe-ebay
 ```
 
 There is no standing `apply` permission. After a separate deployment approval, an administrator
@@ -79,9 +82,10 @@ replay requires fresh administrator authorization.
 
 The root-owned dispatcher validates a finite argument set before calling only root-owned helpers.
 It never runs a script or systemd unit from the uploaded release as root. Package build hooks and
-archive extraction run as `pokehunter-deploy`; the app later runs as the separate `pokehunter` and
-`pokehunter-web` users. The bootstrap refuses if the deployment account belongs to `sudo`, `adm`,
-`docker`, or `lxd`. Confirm the account has no other sudo privileges with:
+archive extraction run as the non-login `pokehunter-build` account, which is separate from the SSH
+deployment identity. The app later runs as the separate `pokehunter` and `pokehunter-web` users.
+The bootstrap refuses if the deployment account belongs to `sudo`, `adm`, `docker`, or `lxd`.
+Confirm the account has no other sudo privileges with:
 
 ```bash
 sudo -l -U pokehunter-deploy

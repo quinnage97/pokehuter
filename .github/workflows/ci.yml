@@ -20,7 +20,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: python -m compileall -q src deploy/*.py tests
+      - run: python -m compileall -q src deploy/*.py tests && python -m py_compile deploy/pokehunter-control
       - run: bash -n deploy/*.sh
       - run: shellcheck deploy/*.sh
       - run: pytest -W error --cov=pokehunter --cov-report=term-missing --cov-fail-under=80

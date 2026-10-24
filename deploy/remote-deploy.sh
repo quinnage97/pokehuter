@@ -1,5 +1,16 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+umask 077
+export HOME=/root
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export TMPDIR=/tmp
+
+if [[ "$#" -ne 6 ]]; then
+  echo "remote deployment requires exactly six arguments"
+  exit 2
+fi
 
 ARTIFACT="${1:?release artifact path is required}"
 RELEASE_ID="${2:?release identifier is required}"
@@ -10,6 +21,7 @@ PURGE_LEGACY_DATA="${6:-NO}"
 LEGACY_DB="/opt/pokehunter/data/ebay_deletions.sqlite3"
 LIBEXEC="/usr/local/libexec/pokehunter"
 DEPLOY_USER="pokehunter-deploy"
+BUILD_USER="pokehunter-build"
 ROOT_ARTIFACT="/var/cache/pokehunter/staging/${RELEASE_ID}.tar.gz"
 RELEASE_SUDOERS="/etc/sudoers.d/pokehunter-release"
 
@@ -26,8 +38,9 @@ if [[ "${ARTIFACT}" != "/tmp/pokehunter-${RELEASE_ID}.tar.gz" ]]; then
   exit 1
 fi
 if [[ ! -f "${ARTIFACT}" || -L "${ARTIFACT}" \
-  || "$(stat -c '%U' "${ARTIFACT}")" != "${DEPLOY_USER}" ]]; then
-  echo "release artifact must be a regular file owned by ${DEPLOY_USER}"
+  || "$(stat -c '%U' "${ARTIFACT}")" != "${DEPLOY_USER}" ]] \
+  || (( 8#$(stat -c '%a' "${ARTIFACT}") & 022 )); then
+  echo "release artifact must be a non-writable regular file owned by ${DEPLOY_USER}"
   exit 1
 fi
 if [[ ! "${ENABLE_MONITOR}" =~ ^(YES|NO|UNCHANGED)$ ]]; then
@@ -39,7 +52,7 @@ if [[ ! "${PURGE_LEGACY_DATA}" =~ ^(YES|NO)$ ]]; then
   exit 1
 fi
 if [[ "${LEGACY_UNIT}" != "none" ]] \
-  && [[ ! "${LEGACY_UNIT}" =~ ^[A-Za-z0-9_.@-]+\.service$ ]]; then
+  && [[ ! "${LEGACY_UNIT}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*\.service$ ]]; then
   echo "invalid legacy unit name"
   exit 1
 fi
@@ -48,15 +61,48 @@ if [[ "${LEGACY_UNIT,,}" =~ (hermes|caddy|docker|ssh|command.centre|ai.command) 
   exit 1
 fi
 
+trusted_root_file() {
+  local path="$1"
+  if [[ ! -f "${path}" || -L "${path}" ]] \
+    || [[ "$(stat -c '%U' "${path}")" != "root" ]] \
+    || (( 8#$(stat -c '%a' "${path}") & 022 )); then
+    echo "privileged file is not a root-controlled regular file: ${path}"
+    exit 1
+  fi
+}
+
+for helper in server-preflight.sh verify-release.sh validate-release.py \
+  purge-legacy-deletion-db.py run-release-check.py; do
+  trusted_root_file "${LIBEXEC}/${helper}"
+done
+if [[ ! -d "${LIBEXEC}" || -L "${LIBEXEC}" ]] \
+  || [[ "$(stat -c '%U' "${LIBEXEC}")" != "root" ]] \
+  || (( 8#$(stat -c '%a' "${LIBEXEC}") & 022 )); then
+  echo "privileged helper directory is not root-controlled"
+  exit 1
+fi
+for directory in /var/cache/pokehunter/staging /opt/pokehunter/releases; do
+  if [[ ! -d "${directory}" || -L "${directory}" ]] \
+    || [[ "$(stat -c '%U' "${directory}")" != "root" ]] \
+    || (( 8#$(stat -c '%a' "${directory}") & 022 )); then
+    echo "deployment directory is not root-controlled: ${directory}"
+    exit 1
+  fi
+done
+if [[ -e "${ROOT_ARTIFACT}" || -L "${ROOT_ARTIFACT}" ]]; then
+  echo "refusing to overwrite an existing root staging artifact"
+  exit 1
+fi
+
 # Copy out of the deployment user's control before validation to prevent checksum/extraction races.
 install -o root -g root -m 0600 "${ARTIFACT}" "${ROOT_ARTIFACT}"
 trap 'rm -f "${ROOT_ARTIFACT}"' EXIT
-python3 "${LIBEXEC}/validate-release.py" \
+/usr/bin/python3 -I "${LIBEXEC}/validate-release.py" \
   "${ROOT_ARTIFACT}" "${RELEASE_ID}" "${EXPECTED_SHA256}"
 rm -f "${ARTIFACT}"
 ARTIFACT="${ROOT_ARTIFACT}"
-expected_authorization="${DEPLOY_USER} ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control apply /tmp/pokehunter-${RELEASE_ID}.tar.gz ${RELEASE_ID} ${EXPECTED_SHA256} ${LEGACY_UNIT} ${ENABLE_MONITOR} ${PURGE_LEGACY_DATA}"
-if [[ ! -f "${RELEASE_SUDOERS}" ]] \
+expected_authorization="${DEPLOY_USER} ALL=(root) NOPASSWD:NOSETENV: /usr/local/sbin/pokehunter-control apply /tmp/pokehunter-${RELEASE_ID}.tar.gz ${RELEASE_ID} ${EXPECTED_SHA256} ${LEGACY_UNIT} ${ENABLE_MONITOR} ${PURGE_LEGACY_DATA}"
+if [[ ! -f "${RELEASE_SUDOERS}" || -L "${RELEASE_SUDOERS}" ]] \
   || [[ "$(stat -c '%U:%G %a' "${RELEASE_SUDOERS}")" != "root:root 440" ]] \
   || ! grep -Fqx "${expected_authorization}" "${RELEASE_SUDOERS}"; then
   echo "missing or invalid one-release authorization"
@@ -69,9 +115,9 @@ rm -f "${RELEASE_SUDOERS}"
 
 public_challenge_hash() {
   local challenge="$1"
-  curl --fail --silent --show-error --max-time 10 \
+  curl --disable --fail --silent --show-error --max-time 10 \
     "https://pokehunter-nq.duckdns.org/ebay/deletion?challenge_code=${challenge}" \
-    | python3 -c \
+    | /usr/bin/python3 -I -c \
       'import json,sys; value=json.load(sys.stdin).get("challengeResponse", ""); assert len(value) == 64; int(value, 16); print(value)'
 }
 continuity_challenge="release-${RELEASE_ID}"
@@ -82,8 +128,8 @@ required_keys=(
   EBAY_DELIVERY_POSTCODE EBAY_AFFILIATE_CAMPAIGN_ID TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
   DATABASE_PATH
 )
-if [[ ! -r /etc/pokehunter.env ]]; then
-  echo "missing /etc/pokehunter.env"
+if [[ ! -f /etc/pokehunter.env || -L /etc/pokehunter.env ]]; then
+  echo "configuration must be a regular file, not a symlink"
   exit 1
 fi
 config_owner="$(stat -c '%U:%G' /etc/pokehunter.env)"
@@ -110,15 +156,25 @@ fi
 
 for unit in pokehunter-web.service pokehunter-monitor.service; do
   unit_path="/etc/systemd/system/${unit}"
-  if [[ -e "${unit_path}" ]] \
-    && ! grep -Fq '/opt/pokehunter/current/.venv/bin/pokehunter' "${unit_path}"; then
+  if [[ ! -f "${unit_path}" || -L "${unit_path}" ]] \
+    || [[ "$(stat -c '%U' "${unit_path}")" != "root" ]] \
+    || (( 8#$(stat -c '%a' "${unit_path}") & 022 )); then
+    echo "refusing unsafe unit file ${unit}"
+    exit 1
+  fi
+  if ! grep -Fq '/opt/pokehunter/current/.venv/bin/pokehunter' "${unit_path}"; then
     echo "refusing to replace unrecognized unit ${unit}"
     exit 1
   fi
 done
 timer_path="/etc/systemd/system/pokehunter-monitor.timer"
-if [[ -e "${timer_path}" ]] \
-  && ! grep -Fq 'Unit=pokehunter-monitor.service' "${timer_path}"; then
+if [[ ! -f "${timer_path}" || -L "${timer_path}" ]] \
+  || [[ "$(stat -c '%U' "${timer_path}")" != "root" ]] \
+  || (( 8#$(stat -c '%a' "${timer_path}") & 022 )); then
+  echo "refusing unsafe unit file pokehunter-monitor.timer"
+  exit 1
+fi
+if ! grep -Fq 'Unit=pokehunter-monitor.service' "${timer_path}"; then
   echo "refusing to replace unrecognized unit pokehunter-monitor.timer"
   exit 1
 fi
@@ -144,6 +200,7 @@ legacy_was_enabled=0
 activated=0
 
 cleanup() {
+  pkill -KILL -u "${BUILD_USER}" >/dev/null 2>&1 || true
   rm -f "${before_fingerprint}" "${after_fingerprint}" "${ARTIFACT}"
 }
 rollback() {
@@ -185,7 +242,7 @@ rollback() {
 trap rollback EXIT
 hermes_fingerprint >"${before_fingerprint}"
 
-for account in "${DEPLOY_USER}" pokehunter pokehunter-web; do
+for account in "${DEPLOY_USER}" "${BUILD_USER}" pokehunter pokehunter-web; do
   if ! id "${account}" >/dev/null 2>&1; then
     echo "missing bootstrapped account: ${account}"
     exit 1
@@ -199,38 +256,47 @@ for unit in pokehunter-web.service pokehunter-monitor.service pokehunter-monitor
 done
 
 release_dir="/opt/pokehunter/releases/${RELEASE_ID}"
-if [[ -e "${release_dir}" ]]; then
+if [[ -e "${release_dir}" || -L "${release_dir}" ]]; then
   echo "release already exists: ${release_dir}"
   exit 1
 fi
-install -d -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" -m 0755 "${release_dir}"
+install -d -o "${BUILD_USER}" -g "${BUILD_USER}" -m 0755 "${release_dir}"
 # Archive parsing and all package build hooks run without root privileges. The deployment account
-# can create PokéHunter releases, but cannot modify root-owned controls, units, secrets, or Hermes.
-runuser -u "${DEPLOY_USER}" -- tar --extract --gzip --no-same-owner --no-same-permissions \
+# can upload only the approved archive; a separate non-login build account owns temporary output.
+runuser -u "${BUILD_USER}" -- env -i HOME="${release_dir}" \
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  tar --extract --gzip --no-same-owner --no-same-permissions \
   --file - --directory "${release_dir}" <"${ARTIFACT}"
 
-nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
-  python3 -m venv "${release_dir}/.venv"
-nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
-  env PIP_CONSTRAINT="${release_dir}/deploy/constraints.txt" \
+nice -n 10 ionice -c2 -n7 runuser -u "${BUILD_USER}" -- \
+  env -i HOME="${release_dir}" PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 python3 -m venv "${release_dir}/.venv"
+nice -n 10 ionice -c2 -n7 runuser -u "${BUILD_USER}" -- \
+  env -i HOME="${release_dir}" PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 PIP_CONFIG_FILE=/dev/null PIP_NO_INPUT=1 \
+  PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_CONSTRAINT="${release_dir}/deploy/constraints.txt" \
   "${release_dir}/.venv/bin/pip" install \
   --disable-pip-version-check --require-virtualenv \
   --constraint "${release_dir}/deploy/constraints.txt" "${release_dir}"
-nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
-  "${release_dir}/.venv/bin/pip" check
-nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
-  "${release_dir}/.venv/bin/python" -m compileall -q \
+nice -n 10 ionice -c2 -n7 runuser -u "${BUILD_USER}" -- \
+  env -i HOME="${release_dir}" PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 "${release_dir}/.venv/bin/pip" check
+nice -n 10 ionice -c2 -n7 runuser -u "${BUILD_USER}" -- \
+  env -i HOME="${release_dir}" PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 "${release_dir}/.venv/bin/python" -m compileall -q \
   "${release_dir}/src"
-chown -R root:root "${release_dir}"
+pkill -KILL -u "${BUILD_USER}" >/dev/null 2>&1 || true
+if pgrep -u "${BUILD_USER}" >/dev/null 2>&1; then
+  echo "build account still has running processes"
+  exit 1
+fi
+chown -hR root:root "${release_dir}"
 
 # Probe OAuth and Browse permissions before changing the live service. Values remain inside the
-# root-owned EnvironmentFile and are never printed or passed on the command line.
-/bin/bash -c \
-  'set -a; source /etc/pokehunter.env; set +a; exec runuser -u pokehunter --preserve-environment -- "$1" check-ebay' \
-  bash "${release_dir}/.venv/bin/pokehunter"
-/bin/bash -c \
-  'set -a; source /etc/pokehunter.env; set +a; exec runuser -u pokehunter --preserve-environment -- "$1" check-telegram' \
-  bash "${release_dir}/.venv/bin/pokehunter"
+# root-owned EnvironmentFile and are never printed, sourced as shell code, or put on the command
+# line. The fixed launcher parses an allowlist, drops all groups and privileges, then executes.
+/usr/bin/python3 -I "${LIBEXEC}/run-release-check.py" "${RELEASE_ID}" check-ebay
+/usr/bin/python3 -I "${LIBEXEC}/run-release-check.py" "${RELEASE_ID}" check-telegram
 
 ln -sfn "${release_dir}" /opt/pokehunter/current.next
 mv -Tf /opt/pokehunter/current.next /opt/pokehunter/current
@@ -292,7 +358,7 @@ if [[ "${legacy_stopped}" -eq 1 ]]; then
 fi
 if [[ "${PURGE_LEGACY_DATA}" == "YES" ]]; then
   # This fixed root-owned helper refuses unexpected tables or columns. It never touches backups.
-  python3 "${LIBEXEC}/purge-legacy-deletion-db.py"
+  /usr/bin/python3 -I "${LIBEXEC}/purge-legacy-deletion-db.py"
 fi
 
 activated=0
