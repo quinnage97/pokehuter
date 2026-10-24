@@ -29,7 +29,7 @@ if [[ ! "${available_kib}" =~ ^[0-9]+$ || "${available_kib}" -lt 524288 ]]; then
 fi
 echo "disk_available_kib=${available_kib}"
 
-echo "os=$(awk -F= '$1 == "PRETTY_NAME" {gsub(/\"/, "", $2); print $2}' /etc/os-release)"
+echo "os=$(awk -F= '$1 == "PRETTY_NAME" {gsub(/"/, "", $2); print $2}' /etc/os-release)"
 echo "python=$(python3 --version 2>&1)"
 
 echo "listener_${PORT}:"
@@ -40,33 +40,27 @@ systemctl list-units --type=service --all --no-legend \
   | awk 'tolower($1) ~ /(pokehunter|ebay|hermes|ai-command|command-centre|caddy)/ {print $1, $3, $4}' \
   || true
 
-echo "relevant_containers:"
-if command -v docker >/dev/null 2>&1; then
-  docker ps --format '{{.ID}} {{.Names}} {{.Status}}' \
-    | awk 'tolower($0) ~ /(hermes|ai-command|command-centre|pokehunter|ebay)/' \
-    || true
-else
-  echo "docker=not-installed"
-fi
+echo "container_runtime=not-inspected-by-policy"
 
 echo "caddy_state=$(systemctl is-active caddy.service 2>/dev/null || true)"
-if command -v caddy >/dev/null 2>&1 && [[ -r /etc/caddy/Caddyfile ]]; then
+if [[ "${EUID}" -eq 0 ]] && command -v caddy >/dev/null 2>&1 \
+  && [[ -r /etc/caddy/Caddyfile ]]; then
   caddy validate --config /etc/caddy/Caddyfile >/dev/null
   echo "caddy_config=valid"
 else
-  echo "caddy_config=not-validated"
+  echo "caddy_config=not-validated-without-privilege"
 fi
 
 if [[ -e /opt/pokehunter ]]; then
   echo "app_path=present"
 else
-  echo "app_path=absent"
+  echo "app_path=absent-or-not-visible"
 fi
 
 if [[ -e /opt/pokehunter/data/ebay_deletions.sqlite3 ]]; then
   echo "legacy_deletion_database=present bytes=$(stat -c '%s' /opt/pokehunter/data/ebay_deletions.sqlite3)"
 else
-  echo "legacy_deletion_database=absent"
+  echo "legacy_deletion_database=absent-or-not-visible"
 fi
 
 if [[ -r /etc/pokehunter.env ]]; then
@@ -74,7 +68,7 @@ if [[ -r /etc/pokehunter.env ]]; then
   echo "config=present mode=${mode} keys:"
   sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' /etc/pokehunter.env | sort -u
 else
-  echo "config=absent"
+  echo "config=absent-or-not-readable"
 fi
 
 body_file="$(mktemp)"

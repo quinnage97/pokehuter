@@ -2,16 +2,17 @@
 
 This runbook preserves the live eBay endpoint at
 `https://pokehunter-nq.duckdns.org/ebay/deletion` and the existing local listener port `8765`.
-The deployment does not edit or reload Caddy. It never targets a Hermes unit, process, container,
-directory, port, or database.
+The deployment does not edit or reload Caddy. It never invokes Docker or targets a Hermes unit,
+process, container, directory, port, or database.
 
 Nothing deploys automatically. The apply path requires the owner to provide an explicit approval
 environment variable after reviewing a read-only preflight.
 
 The SSH identity is installed only for a dedicated `pokehunter-deploy` account. Do not add this
-account to `sudo`, `adm`, `docker`, or any application group. Its only eventual elevation is a
-root-owned `/usr/local/sbin/pokehunter-control` dispatcher with three fixed actions. The dispatcher
-does not accept shell commands, environment assignments, arbitrary paths, or arbitrary programs.
+account to `sudo`, `adm`, `docker`, `lxd`, or any application group. Its standing elevation is
+limited to two exact root-owned `/usr/local/sbin/pokehunter-control` commands: read-only preflight
+and the read-only eBay permission probe. The dispatcher does not accept shell commands,
+environment assignments, arbitrary paths, or arbitrary programs.
 
 ## Safety and approval boundaries
 
@@ -27,8 +28,9 @@ does not accept shell commands, environment assignments, arbitrary paths, or arb
   preserve its existing state unless `YES` or `NO` is explicitly selected.
 - If the legacy deletion database exists, apply refuses to proceed unless the separate destructive
   cleanup flag `POKEHUNTER_PURGE_LEGACY_DELETION_DB=YES` is present.
-- The deployment fingerprints Hermes-related units and containers before and after. Any change
-  causes PokéHunter rollback.
+- The deployment fingerprints visible Hermes-related systemd units before and after. Any change
+  causes PokéHunter rollback. It deliberately does not inspect Docker; the account has no Docker
+  group membership and no helper invokes the Docker API.
 - Do not submit or modify the eBay Marketplace Account Deletion form as part of deployment.
 - The production scanner is blocked until eBay production Browse access is confirmed by the
   read-only `probe-ebay` and release `check-ebay` checks.
@@ -60,17 +62,26 @@ sudo POKEHUNTER_BOOTSTRAP_APPROVED=YES bash deploy/bootstrap-root.sh
 ```
 
 The bootstrap creates the two unprivileged runtime accounts, installs root-owned helpers under
-`/usr/local/libexec/pokehunter`, installs the three fixed PokéHunter units without enabling or
-starting them, and validates `/etc/sudoers.d/pokehunter-deploy`. Its sole sudo rule is:
+`/usr/local/libexec/pokehunter`, installs the three fixed PokéHunter units without enabling,
+starting, or reloading systemd, and validates `/etc/sudoers.d/pokehunter-deploy`. Its complete
+standing sudo policy is:
 
 ```text
-pokehunter-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control *
+pokehunter-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control preflight
+pokehunter-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control probe-ebay
 ```
+
+There is no standing `apply` permission. After a separate deployment approval, an administrator
+must run the root-only `authorize-release-root.sh` helper with the exact artifact path, commit,
+SHA-256, legacy unit, monitor choice, and purge choice. That creates a temporary sudoers entry for
+only that exact invocation. The deployment consumes the entry before cutover, so a failure or
+replay requires fresh administrator authorization.
 
 The root-owned dispatcher validates a finite argument set before calling only root-owned helpers.
 It never runs a script or systemd unit from the uploaded release as root. Package build hooks and
 archive extraction run as `pokehunter-deploy`; the app later runs as the separate `pokehunter` and
-`pokehunter-web` users. Confirm the account has no other sudo privileges with:
+`pokehunter-web` users. The bootstrap refuses if the deployment account belongs to `sudo`, `adm`,
+`docker`, or `lxd`. Confirm the account has no other sudo privileges with:
 
 ```bash
 sudo -l -U pokehunter-deploy
@@ -152,9 +163,29 @@ required EPN agreement.
 
 ## 5. Approval-gated release
 
-Do not run this command until the owner explicitly approves deployment. Pass the exact legacy unit
-name found during preflight. If preflight reports the legacy deletion database, the owner must also
-explicitly approve its irreversible deletion:
+Do not authorize or run these commands until the owner explicitly approves deployment. First build
+and upload the clean Git archive with the non-privileged `stage` action, then have an existing
+administrator run the exact authorization command it prints. Pass the exact legacy unit found
+during preflight and the separately approved monitor/purge choices:
+
+```bash
+POKEHUNTER_STAGE_APPROVED=YES \
+POKEHUNTER_PURGE_LEGACY_DELETION_DB=YES \
+  bash deploy/hetzner-deploy.sh stage <ssh-target> <legacy-unit.service>
+```
+
+The stage action only uploads `/tmp/pokehunter-<commit>.tar.gz`; it does not invoke sudo or change
+services. Its output includes the exact release and checksum in this administrator command:
+
+```bash
+sudo POKEHUNTER_RELEASE_APPROVED=YES \
+  /usr/local/libexec/pokehunter/authorize-release-root.sh \
+  /tmp/pokehunter-<commit>.tar.gz <commit> <sha256> \
+  <legacy-unit.service> UNCHANGED YES
+```
+
+Then run the matching apply command. If preflight reports the legacy deletion database, the owner
+must also explicitly approve its irreversible deletion:
 
 ```bash
 POKEHUNTER_DEPLOY_APPROVED=YES \

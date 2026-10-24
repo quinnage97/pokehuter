@@ -11,6 +11,7 @@ LEGACY_DB="/opt/pokehunter/data/ebay_deletions.sqlite3"
 LIBEXEC="/usr/local/libexec/pokehunter"
 DEPLOY_USER="pokehunter-deploy"
 ROOT_ARTIFACT="/var/cache/pokehunter/staging/${RELEASE_ID}.tar.gz"
+RELEASE_SUDOERS="/etc/sudoers.d/pokehunter-release"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "remote deployment must run as root"
@@ -54,6 +55,16 @@ python3 "${LIBEXEC}/validate-release.py" \
   "${ROOT_ARTIFACT}" "${RELEASE_ID}" "${EXPECTED_SHA256}"
 rm -f "${ARTIFACT}"
 ARTIFACT="${ROOT_ARTIFACT}"
+expected_authorization="${DEPLOY_USER} ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control apply /tmp/pokehunter-${RELEASE_ID}.tar.gz ${RELEASE_ID} ${EXPECTED_SHA256} ${LEGACY_UNIT} ${ENABLE_MONITOR} ${PURGE_LEGACY_DATA}"
+if [[ ! -f "${RELEASE_SUDOERS}" ]] \
+  || [[ "$(stat -c '%U:%G %a' "${RELEASE_SUDOERS}")" != "root:root 440" ]] \
+  || ! grep -Fqx "${expected_authorization}" "${RELEASE_SUDOERS}"; then
+  echo "missing or invalid one-release authorization"
+  exit 1
+fi
+# Consume the exact authorization before any cutover work. A failed release requires a new,
+# explicit administrator authorization and cannot be replayed by the deployment account.
+rm -f "${RELEASE_SUDOERS}"
 "${LIBEXEC}/server-preflight.sh"
 
 public_challenge_hash() {
@@ -115,10 +126,6 @@ fi
 hermes_fingerprint() {
   systemctl list-units --type=service --all --no-legend \
     | awk 'tolower($1) ~ /(hermes|ai-command|command-centre)/ {print $1, $3, $4}'
-  if command -v docker >/dev/null 2>&1; then
-    docker ps --format '{{.ID}} {{.Names}}' \
-      | awk 'tolower($0) ~ /(hermes|ai-command|command-centre)/'
-  fi
 }
 
 before_fingerprint="$(mktemp)"
