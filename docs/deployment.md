@@ -98,10 +98,12 @@ pokehunter check-ebay
 pokehunter check-telegram
 ```
 
-`check-ebay` obtains an application token and performs the configured Browse searches. It does not
-send alerts, write the database, or print tokens or listing details. A successful result proves the
-credentials can call Browse in the configured environment; it does not replace confirmation that
-eBay approved this production bargain-ranking/alert use case or any required EPN agreement.
+`check-ebay` obtains an application token, performs the configured Browse searches, and exercises
+English filtering, like-for-like comparisons, and bargain thresholds. It does not send alerts,
+write the database, or print tokens or listing details. A successful result proves the credentials
+can call Browse and the scanner can consume current results in the configured environment; it does
+not replace confirmation that eBay approved this production bargain-ranking/alert use case or any
+required EPN agreement.
 
 `check-telegram` calls only `getMe` and `getChat`; it sends no message.
 

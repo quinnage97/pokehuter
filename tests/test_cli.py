@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+from conftest import make_listing
+
 from pokehunter import cli
 
 
@@ -22,7 +24,14 @@ def test_check_ebay_reports_access_without_listing_details(settings, monkeypatch
             pass
 
         async def search(self, query):
-            return [object()] if "Charizard" in query else []
+            if "Charizard" not in query:
+                return []
+            return [
+                make_listing("1", "20"),
+                make_listing("2", "100"),
+                make_listing("3", "100"),
+                make_listing("4", "100"),
+            ]
 
     monkeypatch.setattr(cli.httpx, "AsyncClient", lambda **_: FakeHttp())
     monkeypatch.setattr(cli, "EbayClient", FakeEbay)
@@ -33,7 +42,9 @@ def test_check_ebay_reports_access_without_listing_details(settings, monkeypatch
         "status": "ok",
         "environment": "production",
         "queries": 2,
-        "parsed_listings": 1,
+        "parsed_listings": 4,
+        "eligible_listings": 4,
+        "bargain_candidates": 1,
         "affiliate_tracking": True,
     }
 

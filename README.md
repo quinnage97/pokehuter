@@ -55,6 +55,9 @@ Validate external access without writing scanner state or sending a message:
 .venv/bin/pokehunter check-telegram
 ```
 
+The eBay check also exercises English filtering, comparisons, and bargain thresholds. It stores
+nothing and sends no alerts. The Telegram check uses only read-only bot methods.
+
 Run the webhook locally (the eBay portal still requires a public HTTPS endpoint):
 
 ```bash
