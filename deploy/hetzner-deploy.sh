@@ -61,6 +61,8 @@ case "${MODE}" in
       exit 1
     fi
     scp "${temp_dir}/${release_id}.tar.gz" "${SSH_TARGET}:/tmp/pokehunter-${release_id}.tar.gz"
+    # All client-side expansions below are constrained by strict allowlists or Git output.
+    # shellcheck disable=SC2029
     ssh "${SSH_TARGET}" \
       "sudo -n POKEHUNTER_DEPLOY_APPROVED=YES POKEHUNTER_ENABLE_MONITOR=${ENABLE_MONITOR} POKEHUNTER_PURGE_LEGACY_DELETION_DB=${PURGE_LEGACY_DATA} bash -s -- /tmp/pokehunter-${release_id}.tar.gz ${release_id} ${artifact_sha256} ${LEGACY_UNIT}" \
       <"${ROOT}/deploy/remote-deploy.sh"
