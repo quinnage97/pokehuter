@@ -8,9 +8,15 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(git -C "${SCRIPT_DIR}/.." rev-parse --show-toplevel)"
 ENABLE_MONITOR="${POKEHUNTER_ENABLE_MONITOR:-UNCHANGED}"
 PURGE_LEGACY_DATA="${POKEHUNTER_PURGE_LEGACY_DELETION_DB:-NO}"
+SSH_IDENTITY="${POKEHUNTER_SSH_IDENTITY:-${HOME}/.ssh/pokehunter_deploy_ed25519}"
+CONTROL_COMMAND="/usr/local/sbin/pokehunter-control"
 
 if [[ -z "${MODE}" || -z "${SSH_TARGET}" ]]; then
-  echo "usage: $0 preflight|probe-ebay|apply <ssh-target> [legacy-unit.service]"
+  echo "usage: $0 preflight|privileged-preflight|probe-ebay|apply <ssh-target> [legacy-unit.service]"
+  exit 2
+fi
+if [[ ! -f "${SSH_IDENTITY}" ]]; then
+  echo "missing dedicated SSH identity: ${SSH_IDENTITY}"
   exit 2
 fi
 if [[ ! "${SSH_TARGET}" =~ ^([A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$ ]]; then
@@ -33,11 +39,17 @@ fi
 
 case "${MODE}" in
   preflight)
-    ssh "${SSH_TARGET}" 'sudo -n bash -s' <"${ROOT}/deploy/server-preflight.sh"
+    # Safe before the root bootstrap is installed. Privileged fields are reported as unavailable.
+    ssh -i "${SSH_IDENTITY}" -o IdentitiesOnly=yes "${SSH_TARGET}" 'bash -s' \
+      <"${ROOT}/deploy/server-preflight.sh"
+    ;;
+  privileged-preflight)
+    ssh -i "${SSH_IDENTITY}" -o IdentitiesOnly=yes "${SSH_TARGET}" \
+      "sudo -n ${CONTROL_COMMAND} preflight"
     ;;
   probe-ebay)
-    ssh "${SSH_TARGET}" 'sudo -n python3 - --env /opt/pokehunter/.env' \
-      <"${ROOT}/deploy/probe-existing-ebay.py"
+    ssh -i "${SSH_IDENTITY}" -o IdentitiesOnly=yes "${SSH_TARGET}" \
+      "sudo -n ${CONTROL_COMMAND} probe-ebay"
     ;;
   apply)
     if [[ "${POKEHUNTER_DEPLOY_APPROVED:-}" != "YES" ]]; then
@@ -60,12 +72,12 @@ case "${MODE}" in
       echo "missing SHA-256 utility (shasum or sha256sum)"
       exit 1
     fi
-    scp "${temp_dir}/${release_id}.tar.gz" "${SSH_TARGET}:/tmp/pokehunter-${release_id}.tar.gz"
+    scp -i "${SSH_IDENTITY}" -o IdentitiesOnly=yes \
+      "${temp_dir}/${release_id}.tar.gz" "${SSH_TARGET}:/tmp/pokehunter-${release_id}.tar.gz"
     # All client-side expansions below are constrained by strict allowlists or Git output.
     # shellcheck disable=SC2029
-    ssh "${SSH_TARGET}" \
-      "sudo -n POKEHUNTER_DEPLOY_APPROVED=YES POKEHUNTER_ENABLE_MONITOR=${ENABLE_MONITOR} POKEHUNTER_PURGE_LEGACY_DELETION_DB=${PURGE_LEGACY_DATA} bash -s -- /tmp/pokehunter-${release_id}.tar.gz ${release_id} ${artifact_sha256} ${LEGACY_UNIT}" \
-      <"${ROOT}/deploy/remote-deploy.sh"
+    ssh -i "${SSH_IDENTITY}" -o IdentitiesOnly=yes "${SSH_TARGET}" \
+      "sudo -n ${CONTROL_COMMAND} apply /tmp/pokehunter-${release_id}.tar.gz ${release_id} ${artifact_sha256} ${LEGACY_UNIT} ${ENABLE_MONITOR} ${PURGE_LEGACY_DATA}"
     ;;
   *)
     echo "unknown mode: ${MODE}"

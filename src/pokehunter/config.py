@@ -72,12 +72,22 @@ class Settings(BaseSettings):
         if self.ebay_affiliate_reference_id and len(self.ebay_affiliate_reference_id) > 256:
             raise ValueError("EBAY_AFFILIATE_REFERENCE_ID cannot exceed 256 characters")
         if self.ebay_environment.lower() == "production":
+            if (
+                self.ebay_marketplace_id != "EBAY_GB"
+                or self.ebay_currency != "GBP"
+                or self.ebay_delivery_country != "GB"
+            ):
+                raise ValueError(
+                    "Production is restricted to EBAY_GB with GBP pricing and GB delivery"
+                )
             if not self.ebay_affiliate_campaign_id:
                 raise ValueError(
                     "EBAY_AFFILIATE_CAMPAIGN_ID is required for production Browse API use"
                 )
             if not self.ebay_delivery_postcode:
                 raise ValueError("EBAY_DELIVERY_POSTCODE is required for production Browse API use")
+            if not re.fullmatch(r"[A-Za-z0-9 ]{2,10}", self.ebay_delivery_postcode):
+                raise ValueError("EBAY_DELIVERY_POSTCODE contains unsupported characters")
 
     def require_telegram_credentials(self) -> tuple[str, str]:
         if not self.telegram_bot_token or not self.telegram_chat_id:

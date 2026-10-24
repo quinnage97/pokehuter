@@ -55,3 +55,24 @@ def test_existing_ebay_probe_reports_only_safe_metadata(tmp_path, monkeypatch, c
         "delivery_postcode_configured": True,
     }
     assert "never-print" not in output
+
+
+def test_existing_ebay_probe_fails_closed_without_production_context(tmp_path, monkeypatch, capsys):
+    probe = load_probe()
+    env_file = tmp_path / ".env"
+    env_file.write_text("EBAY_CLIENT_ID=client-id\nEBAY_CLIENT_SECRET=client-secret\n")
+    monkeypatch.setattr(sys, "argv", ["probe-existing-ebay.py", "--env", str(env_file)])
+    for key in (
+        "EBAY_CLIENT_ID",
+        "EBAY_CLIENT_SECRET",
+        "EBAY_AFFILIATE_CAMPAIGN_ID",
+        "EBAY_DELIVERY_POSTCODE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    assert probe.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "error",
+        "stage": "configuration",
+        "affiliate_or_postcode_invalid": True,
+    }

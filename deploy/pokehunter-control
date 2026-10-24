@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This file is installed root-owned by bootstrap-root.sh. The deployment account can invoke only
+# this finite dispatcher through sudo; no shell, environment assignment, or arbitrary executable
+# is delegated.
+LIBEXEC="/usr/local/libexec/pokehunter"
+ACTION="${1:-}"
+shift || true
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "pokehunter-control must run through its narrow sudo rule"
+  exit 1
+fi
+
+case "${ACTION}" in
+  preflight)
+    [[ "$#" -eq 0 ]] || { echo "preflight takes no arguments"; exit 2; }
+    exec "${LIBEXEC}/server-preflight.sh"
+    ;;
+  probe-ebay)
+    [[ "$#" -eq 0 ]] || { echo "probe-ebay takes no arguments"; exit 2; }
+    exec /usr/bin/python3 "${LIBEXEC}/probe-existing-ebay.py" --env /opt/pokehunter/.env
+    ;;
+  apply)
+    [[ "$#" -eq 6 ]] || { echo "apply requires six validated arguments"; exit 2; }
+    exec "${LIBEXEC}/remote-deploy.sh" "$@"
+    ;;
+  *)
+    echo "allowed actions: preflight, probe-ebay, apply"
+    exit 2
+    ;;
+esac

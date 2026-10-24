@@ -26,6 +26,10 @@ For each configured search, PokéHunter:
 6. Sends an alert once per eBay item ID. A failed send is recorded without marking the item as
    alerted, so it can retry on the next run.
 
+Eligible alerts retain eBay's returned Best Match order; PokéHunter does not re-sort Browse
+results. The bargain score is used only as a threshold and as explanatory alert metadata. The
+production-access application must accurately disclose this filtering and comparison use case.
+
 The estimate is based on **current asking prices, not completed-sale prices**. Alerts say this
 explicitly. Authenticity and condition still require a human check.
 
@@ -105,7 +109,9 @@ inventory is synthetic.
 | --- | --- |
 | `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` | eBay production or sandbox app credentials |
 | `EBAY_ENVIRONMENT` | `production` or `sandbox` |
-| `EBAY_DELIVERY_POSTCODE` | Recommended destination postcode for accurate calculated shipping |
+| `EBAY_MARKETPLACE_ID` | Marketplace; production deployment is fixed to `EBAY_GB` |
+| `EBAY_DELIVERY_COUNTRY` | Delivery country; production deployment uses `GB` |
+| `EBAY_DELIVERY_POSTCODE` | Configurable UK destination postcode for calculated shipping |
 | `EBAY_AFFILIATE_CAMPAIGN_ID` | 10-digit EPN campaign ID for production affiliate tracking |
 | `EBAY_AFFILIATE_REFERENCE_ID` | Optional EPN reference ID, maximum 256 characters |
 | `EBAY_DELETION_ENDPOINT` | Exact public HTTPS webhook URL |

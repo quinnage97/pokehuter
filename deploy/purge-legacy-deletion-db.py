@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 LEGACY_DATABASE = Path("/opt/pokehunter/data/ebay_deletions.sqlite3")
+EXPECTED_COLUMNS = {"notification_id", "username", "user_id", "received_at"}
 
 
 def purge_database(path: Path) -> None:
@@ -16,12 +17,21 @@ def purge_database(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:
         connection.execute("PRAGMA secure_delete=ON")
-        table = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='deletions'"
-        ).fetchone()
-        if table:
-            connection.execute("DELETE FROM deletions")
-            connection.commit()
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        if tables != {"deletions"}:
+            raise RuntimeError(
+                "refusing legacy purge: database contains missing or unrelated tables"
+            )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(deletions)")}
+        if columns != EXPECTED_COLUMNS:
+            raise RuntimeError("refusing legacy purge: unexpected deletions schema")
+        connection.execute("DELETE FROM deletions")
+        connection.commit()
         connection.execute("VACUUM")
     finally:
         connection.close()

@@ -8,11 +8,18 @@ directory, port, or database.
 Nothing deploys automatically. The apply path requires the owner to provide an explicit approval
 environment variable after reviewing a read-only preflight.
 
+The SSH identity is installed only for a dedicated `pokehunter-deploy` account. Do not add this
+account to `sudo`, `adm`, `docker`, or any application group. Its only eventual elevation is a
+root-owned `/usr/local/sbin/pokehunter-control` dispatcher with three fixed actions. The dispatcher
+does not accept shell commands, environment assignments, arbitrary paths, or arbitrary programs.
+
 ## Safety and approval boundaries
 
-- `deploy/hetzner-deploy.sh preflight` is read-only. It inventories only relevant services,
-  listeners, containers, Caddy validation state, configuration key names, and the public challenge
-  response. It never prints configuration values.
+- `deploy/hetzner-deploy.sh preflight` runs without sudo and is safe immediately after the key is
+  installed. `privileged-preflight` becomes available only after the separately approved bootstrap.
+- The bootstrap installs fixed root-owned helpers, fixed systemd units, and one narrow sudoers
+  rule. It does not deploy a release, start a service, touch Caddy or Hermes, migrate configuration,
+  or delete data.
 - `apply` refuses to run unless `POKEHUNTER_DEPLOY_APPROVED=YES` is present and the local worktree
   is clean.
 - The monitor timer remains disabled unless the separate
@@ -23,27 +30,68 @@ environment variable after reviewing a read-only preflight.
 - The deployment fingerprints Hermes-related units and containers before and after. Any change
   causes PokéHunter rollback.
 - Do not submit or modify the eBay Marketplace Account Deletion form as part of deployment.
+- The production scanner is blocked until eBay production Browse access is confirmed by the
+  read-only `probe-ebay` and release `check-ebay` checks.
 
-## 1. Read-only server preflight
+## 1. Dedicated deployment identity and read-only preflight
 
-Use a sudo-capable SSH account. This command performs no server mutation:
+Install the supplied public key for a separate `pokehunter-deploy` account with the OpenSSH
+`restrict` option. Do not grant it general sudo access. The client uses the dedicated private key
+at `~/.ssh/pokehunter_deploy_ed25519` by default; override only with
+`POKEHUNTER_SSH_IDENTITY=/absolute/path`.
+
+This command performs no server mutation and does not use sudo:
 
 ```bash
 bash deploy/hetzner-deploy.sh preflight <ssh-target>
 ```
 
-Confirm that the output identifies the current legacy PokéHunter/eBay webhook service listening on
+It can confirm SSH, OS, Python, the listener, visible service state, disk space, and the public
+webhook. Fields requiring root access are reported as unavailable. It never reads secrets.
+
+## 2. Separately approved root bootstrap
+
+Do not run the bootstrap merely to perform the initial read-only preflight. After its exact commit
+has been reviewed and the owner explicitly approves this server change, a current administrator
+may run from a root-controlled copy of the release:
+
+```bash
+sudo POKEHUNTER_BOOTSTRAP_APPROVED=YES bash deploy/bootstrap-root.sh
+```
+
+The bootstrap creates the two unprivileged runtime accounts, installs root-owned helpers under
+`/usr/local/libexec/pokehunter`, installs the three fixed PokéHunter units without enabling or
+starting them, and validates `/etc/sudoers.d/pokehunter-deploy`. Its sole sudo rule is:
+
+```text
+pokehunter-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pokehunter-control *
+```
+
+The root-owned dispatcher validates a finite argument set before calling only root-owned helpers.
+It never runs a script or systemd unit from the uploaded release as root. Package build hooks and
+archive extraction run as `pokehunter-deploy`; the app later runs as the separate `pokehunter` and
+`pokehunter-web` users. Confirm the account has no other sudo privileges with:
+
+```bash
+sudo -l -U pokehunter-deploy
+```
+
+Then run the complete privileged inventory:
+
+```bash
+bash deploy/hetzner-deploy.sh privileged-preflight <ssh-target>
+```
+
+Confirm that it identifies the current legacy PokéHunter/eBay webhook service on
 `127.0.0.1:8765`, reports the public webhook healthy, and reports Caddy's configuration valid.
-Record the exact legacy systemd unit name; the apply script will refuse to stop any unit unless its
-`ExecStart` identifies it as PokéHunter or `ebay_notifications.py`. If the listener cannot be tied
-to such a unit, stop and inspect it manually.
+Record the exact legacy unit name. Apply refuses to stop a unit unless its `ExecStart` identifies
+it as PokéHunter or `ebay_notifications.py` and its process owns port 8765.
 
 The preflight also reports whether `/opt/pokehunter/data/ebay_deletions.sqlite3` exists. The legacy
 implementation stores eBay usernames and user IDs there. Unless there is a documented legal
 retention requirement, this personal data should be deleted at a separately approved cutover.
 
-Check the existing production keyset without installing software, writing server files, or showing
-credentials:
+Check the existing production keyset without writing server files or showing credentials:
 
 ```bash
 bash deploy/hetzner-deploy.sh probe-ebay <ssh-target>
@@ -51,16 +99,10 @@ bash deploy/hetzner-deploy.sh probe-ebay <ssh-target>
 
 This reads the legacy `/opt/pokehunter/.env` in memory and reports only OAuth/Browse HTTP status,
 the number of returned summaries, and whether the EPN campaign and delivery postcode are present.
+It is not a substitute for explicit eBay production-access confirmation. A failed or unconfirmed
+production probe blocks deployment.
 
-## 2. Prepare root-owned configuration
-
-Create the isolated scanner and public-webhook accounts before deployment:
-
-```bash
-sudo useradd --system --home /var/lib/pokehunter --shell /usr/sbin/nologin pokehunter
-sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin pokehunter-web
-sudo install -d -o pokehunter -g pokehunter -m 0750 /var/lib/pokehunter
-```
+## 3. Prepare root-owned configuration
 
 The migration helper reads legacy values on the server, never displays them, and is dry-run by
 default:
@@ -85,10 +127,11 @@ this runbook. Required production values include:
 - exact endpoint `https://pokehunter-nq.duckdns.org/ebay/deletion`;
 - Telegram bot token and target chat ID;
 - `DATABASE_PATH=/var/lib/pokehunter/pokehunter.sqlite3`;
-- the GB delivery postcode; and
+- `EBAY_MARKETPLACE_ID=EBAY_GB`, `EBAY_CURRENCY=GBP`, and `EBAY_DELIVERY_COUNTRY=GB`;
+- a configurable `EBAY_DELIVERY_POSTCODE` for the intended delivery area; and
 - the 10-digit EPN campaign ID required for production Browse use.
 
-## 3. Permission checks
+## 4. Permission checks
 
 The deployment builds an isolated release and runs both checks before changing the live symlink or
 stopping the legacy webhook:
@@ -107,7 +150,7 @@ required EPN agreement.
 
 `check-telegram` calls only `getMe` and `getChat`; it sends no message.
 
-## 4. Approval-gated release
+## 5. Approval-gated release
 
 Do not run this command until the owner explicitly approves deployment. Pass the exact legacy unit
 name found during preflight. If preflight reports the legacy deletion database, the owner must also
@@ -119,10 +162,12 @@ POKEHUNTER_PURGE_LEGACY_DELETION_DB=YES \
   bash deploy/hetzner-deploy.sh apply <ssh-target> <legacy-unit.service>
 ```
 
-The script creates an immutable release under `/opt/pokehunter/releases/<commit>`, installs pinned
-top-level dependencies into that release, validates the systemd units, runs both permission checks,
-and atomically switches `/opt/pokehunter/current`. It stops only the validated legacy PokéHunter
-unit and starts only `pokehunter-web.service`. The existing Caddy route and port remain unchanged.
+The script uploads a checksum-verified Git archive and invokes only the fixed root-owned control
+command. It creates an immutable release under `/opt/pokehunter/releases/<commit>`, installs pinned
+top-level dependencies as the unprivileged deployment account, validates the fixed root-owned
+systemd units, runs both permission checks, and atomically switches `/opt/pokehunter/current`. It
+stops only the validated legacy PokéHunter unit and starts only `pokehunter-web.service`. The
+existing Caddy route and port remain unchanged.
 The public webhook and monitor run under different unprivileged accounts with bounded memory,
 task counts, and low CPU/I/O weights, so the scanner cannot contend aggressively with Hermes.
 The release must reproduce the legacy server's challenge hash for the same unique challenge,
@@ -132,14 +177,17 @@ After local and public webhook verification passes, the old unit is disabled. An
 activation restores the previous symlink and restarts the validated legacy unit. Release files are
 left in place for diagnosis; no broad cleanup or restart is performed. When separately approved,
 only the exact legacy SQLite database and its SQLite sidecar files are deleted after verification.
-The purge enables SQLite secure deletion, deletes the rows, vacuums the file, and then unlinks it.
-The operator must separately confirm that Hetzner snapshots or backups containing the legacy file
-are deleted or expire under an appropriate documented retention policy.
+The purge first refuses any database with an unexpected table or deletion schema, then enables
+SQLite secure deletion, deletes the rows, vacuums the file, and unlinks only the exact legacy file
+and its SQLite sidecars. It never traverses directories, deletes unrelated data, or modifies any
+Hetzner snapshot or backup. Existing backups remain untouched and should follow the owner's normal
+retention policy; do not delete an entire backup merely to remove this database.
 
-## 5. Separately enable scheduled monitoring
+## 6. Separately enable scheduled monitoring
 
-Enabling alerts is a separate operational decision. After reviewing a manual monitor result and
-logs, an administrator may explicitly enable only `pokehunter-monitor.timer` after approval:
+Enabling alerts is a separate operational decision and must wait for confirmed production eBay
+access. After reviewing a manual monitor result and logs, an administrator may explicitly enable
+only `pokehunter-monitor.timer` after approval:
 
 ```bash
 sudo systemctl enable --now pokehunter-monitor.timer

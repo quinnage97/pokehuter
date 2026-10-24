@@ -97,7 +97,9 @@ class Monitor:
                     if not already_alerted:
                         bargains.append(bargain)
 
-            for bargain in sorted(bargains, key=lambda item: item.score, reverse=True):
+            # Preserve the Best Match order returned by eBay. Score is a threshold and an alert
+            # explanation, not a replacement sort order for eBay Browse results.
+            for bargain in bargains:
                 item_id = bargain.listing.item_id
                 try:
                     await self.telegram.send_bargain(bargain)

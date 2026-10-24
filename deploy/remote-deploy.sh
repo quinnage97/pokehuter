@@ -5,16 +5,15 @@ ARTIFACT="${1:?release artifact path is required}"
 RELEASE_ID="${2:?release identifier is required}"
 EXPECTED_SHA256="${3:?release SHA-256 is required}"
 LEGACY_UNIT="${4:-none}"
-ENABLE_MONITOR="${POKEHUNTER_ENABLE_MONITOR:-UNCHANGED}"
-PURGE_LEGACY_DATA="${POKEHUNTER_PURGE_LEGACY_DELETION_DB:-NO}"
+ENABLE_MONITOR="${5:-UNCHANGED}"
+PURGE_LEGACY_DATA="${6:-NO}"
 LEGACY_DB="/opt/pokehunter/data/ebay_deletions.sqlite3"
+LIBEXEC="/usr/local/libexec/pokehunter"
+DEPLOY_USER="pokehunter-deploy"
+ROOT_ARTIFACT="/var/cache/pokehunter/staging/${RELEASE_ID}.tar.gz"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "remote deployment must run as root"
-  exit 1
-fi
-if [[ "${POKEHUNTER_DEPLOY_APPROVED:-}" != "YES" ]]; then
-  echo "deployment approval gate is closed"
   exit 1
 fi
 if [[ ! "${RELEASE_ID}" =~ ^[0-9a-f]{7,40}$ ]]; then
@@ -25,13 +24,9 @@ if [[ "${ARTIFACT}" != "/tmp/pokehunter-${RELEASE_ID}.tar.gz" ]]; then
   echo "unexpected release artifact path"
   exit 1
 fi
-if ! command -v sha256sum >/dev/null 2>&1; then
-  echo "missing sha256sum"
-  exit 1
-fi
-if [[ ! "${EXPECTED_SHA256}" =~ ^[0-9a-f]{64}$ ]] \
-  || [[ "$(sha256sum "${ARTIFACT}" | awk '{print $1}')" != "${EXPECTED_SHA256}" ]]; then
-  echo "release artifact checksum mismatch"
+if [[ ! -f "${ARTIFACT}" || -L "${ARTIFACT}" \
+  || "$(stat -c '%U' "${ARTIFACT}")" != "${DEPLOY_USER}" ]]; then
+  echo "release artifact must be a regular file owned by ${DEPLOY_USER}"
   exit 1
 fi
 if [[ ! "${ENABLE_MONITOR}" =~ ^(YES|NO|UNCHANGED)$ ]]; then
@@ -52,15 +47,14 @@ if [[ "${LEGACY_UNIT,,}" =~ (hermes|caddy|docker|ssh|command.centre|ai.command) 
   exit 1
 fi
 
-if tar --list --gzip --file "${ARTIFACT}" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
-  echo "unsafe release archive"
-  exit 1
-fi
-preflight_script="$(mktemp)"
-tar --extract --gzip --to-stdout --file "${ARTIFACT}" deploy/server-preflight.sh \
-  >"${preflight_script}"
-bash "${preflight_script}"
-rm -f "${preflight_script}"
+# Copy out of the deployment user's control before validation to prevent checksum/extraction races.
+install -o root -g root -m 0600 "${ARTIFACT}" "${ROOT_ARTIFACT}"
+trap 'rm -f "${ROOT_ARTIFACT}"' EXIT
+python3 "${LIBEXEC}/validate-release.py" \
+  "${ROOT_ARTIFACT}" "${RELEASE_ID}" "${EXPECTED_SHA256}"
+rm -f "${ARTIFACT}"
+ARTIFACT="${ROOT_ARTIFACT}"
+"${LIBEXEC}/server-preflight.sh"
 
 public_challenge_hash() {
   local challenge="$1"
@@ -184,35 +178,40 @@ rollback() {
 trap rollback EXIT
 hermes_fingerprint >"${before_fingerprint}"
 
-if ! id pokehunter >/dev/null 2>&1; then
-  useradd --system --home /var/lib/pokehunter --shell /usr/sbin/nologin pokehunter
-fi
-if ! id pokehunter-web >/dev/null 2>&1; then
-  useradd --system --home /nonexistent --shell /usr/sbin/nologin pokehunter-web
-fi
-install -d -o root -g root -m 0755 /opt/pokehunter /opt/pokehunter/releases
-install -d -o pokehunter -g pokehunter -m 0750 /var/lib/pokehunter
+for account in "${DEPLOY_USER}" pokehunter pokehunter-web; do
+  if ! id "${account}" >/dev/null 2>&1; then
+    echo "missing bootstrapped account: ${account}"
+    exit 1
+  fi
+done
+for unit in pokehunter-web.service pokehunter-monitor.service pokehunter-monitor.timer; do
+  if [[ ! -f "/etc/systemd/system/${unit}" ]]; then
+    echo "missing bootstrapped unit: ${unit}"
+    exit 1
+  fi
+done
 
 release_dir="/opt/pokehunter/releases/${RELEASE_ID}"
 if [[ -e "${release_dir}" ]]; then
   echo "release already exists: ${release_dir}"
   exit 1
 fi
-install -d -o pokehunter -g pokehunter -m 0755 "${release_dir}"
-tar --extract --gzip --no-same-owner --no-same-permissions \
-  --file "${ARTIFACT}" --directory "${release_dir}"
-chown -R pokehunter:pokehunter "${release_dir}"
+install -d -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" -m 0755 "${release_dir}"
+# Archive parsing and all package build hooks run without root privileges. The deployment account
+# can create PokéHunter releases, but cannot modify root-owned controls, units, secrets, or Hermes.
+runuser -u "${DEPLOY_USER}" -- tar --extract --gzip --no-same-owner --no-same-permissions \
+  --file - --directory "${release_dir}" <"${ARTIFACT}"
 
-nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
   python3 -m venv "${release_dir}/.venv"
-nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
   env PIP_CONSTRAINT="${release_dir}/deploy/constraints.txt" \
   "${release_dir}/.venv/bin/pip" install \
   --disable-pip-version-check --require-virtualenv \
   --constraint "${release_dir}/deploy/constraints.txt" "${release_dir}"
-nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
   "${release_dir}/.venv/bin/pip" check
-nice -n 10 ionice -c2 -n7 runuser -u pokehunter -- \
+nice -n 10 ionice -c2 -n7 runuser -u "${DEPLOY_USER}" -- \
   "${release_dir}/.venv/bin/python" -m compileall -q \
   "${release_dir}/src"
 chown -R root:root "${release_dir}"
@@ -225,13 +224,6 @@ chown -R root:root "${release_dir}"
 /bin/bash -c \
   'set -a; source /etc/pokehunter.env; set +a; exec runuser -u pokehunter --preserve-environment -- "$1" check-telegram' \
   bash "${release_dir}/.venv/bin/pokehunter"
-
-install -o root -g root -m 0644 \
-  "${release_dir}/deploy/systemd/pokehunter-web.service" /etc/systemd/system/
-install -o root -g root -m 0644 \
-  "${release_dir}/deploy/systemd/pokehunter-monitor.service" /etc/systemd/system/
-install -o root -g root -m 0644 \
-  "${release_dir}/deploy/systemd/pokehunter-monitor.timer" /etc/systemd/system/
 
 ln -sfn "${release_dir}" /opt/pokehunter/current.next
 mv -Tf /opt/pokehunter/current.next /opt/pokehunter/current
@@ -276,7 +268,7 @@ else
   echo "monitor_timer=unchanged"
 fi
 
-bash "${release_dir}/deploy/verify-release.sh" "${RELEASE_ID}"
+"${LIBEXEC}/verify-release.sh" "${RELEASE_ID}"
 replacement_challenge_hash="$(public_challenge_hash "${continuity_challenge}")"
 if [[ "${replacement_challenge_hash}" != "${legacy_challenge_hash}" ]]; then
   echo "webhook challenge response changed; rolling back PokéHunter"
@@ -292,7 +284,8 @@ if [[ "${legacy_stopped}" -eq 1 ]]; then
   systemctl disable "${LEGACY_UNIT}"
 fi
 if [[ "${PURGE_LEGACY_DATA}" == "YES" ]]; then
-  python3 "${release_dir}/deploy/purge-legacy-deletion-db.py"
+  # This fixed root-owned helper refuses unexpected tables or columns. It never touches backups.
+  python3 "${LIBEXEC}/purge-legacy-deletion-db.py"
 fi
 
 activated=0

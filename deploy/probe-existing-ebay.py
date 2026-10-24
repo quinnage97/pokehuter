@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -57,6 +58,11 @@ def main() -> int:
     if not client_id or not client_secret:
         print('{"status":"error","stage":"configuration","missing_credentials":true}')
         return 1
+    if not re.fullmatch(r"\d{10}", campaign_id) or not re.fullmatch(
+        r"[A-Za-z0-9 ]{2,10}", postcode
+    ):
+        print('{"status":"error","stage":"configuration","affiliate_or_postcode_invalid":true}')
+        return 1
 
     basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     token_request = Request(
@@ -97,7 +103,10 @@ def main() -> int:
             {
                 "q": "Charizard pokemon card",
                 "category_ids": "183454",
-                "filter": "deliveryCountry:GB,buyingOptions:{FIXED_PRICE}",
+                "filter": (
+                    "deliveryCountry:GB,buyingOptions:{FIXED_PRICE},"
+                    f"deliveryPostalCode:{postcode}"
+                ),
                 "limit": "3",
             }
         )
