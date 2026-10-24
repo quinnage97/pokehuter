@@ -20,6 +20,7 @@ from .webhook import (
 
 logger = logging.getLogger(__name__)
 MAX_NOTIFICATION_BYTES = 64 * 1024
+MAX_SIGNATURE_HEADER_BYTES = 4096
 
 
 def create_app(
@@ -48,7 +49,8 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/webhooks/ebay/account-deletion")
+    @app.get("/ebay/deletion", include_in_schema=False)
+    @app.get("/webhooks/ebay/account-deletion", include_in_schema=False)
     async def verify_endpoint(
         challenge_code: str = Query(..., min_length=1, max_length=512),
     ) -> JSONResponse:
@@ -61,7 +63,8 @@ def create_app(
             {"challengeResponse": challenge_response(challenge_code, token, endpoint)}
         )
 
-    @app.post("/webhooks/ebay/account-deletion")
+    @app.post("/ebay/deletion", include_in_schema=False)
+    @app.post("/webhooks/ebay/account-deletion", include_in_schema=False)
     async def receive_deletion(
         request: Request,
         x_ebay_signature: str | None = Header(default=None),
@@ -72,6 +75,8 @@ def create_app(
             raise HTTPException(status_code=415, detail="Content-Type must be application/json")
         if not x_ebay_signature:
             raise HTTPException(status_code=412, detail="Missing notification signature")
+        if len(x_ebay_signature.encode("utf-8")) > MAX_SIGNATURE_HEADER_BYTES:
+            raise HTTPException(status_code=412, detail="Invalid notification signature")
         body = await request.body()
         if not body or len(body) > MAX_NOTIFICATION_BYTES:
             raise HTTPException(status_code=413, detail="Invalid notification size")

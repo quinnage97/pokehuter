@@ -17,6 +17,23 @@ class TelegramClient:
         self.settings = settings
         self.http = http
 
+    async def check_access(self) -> None:
+        """Validate the bot token and target chat without sending a message."""
+        token, chat_id = self.settings.require_telegram_credentials()
+        for method, params in (("getMe", None), ("getChat", {"chat_id": chat_id})):
+            try:
+                response = await self.http.get(
+                    f"https://api.telegram.org/bot{token}/{method}", params=params
+                )
+            except httpx.HTTPError:
+                # The bot token is part of Telegram's request URL, so never propagate the
+                # underlying exception into application logs.
+                raise TelegramError(f"Telegram {method} request failed") from None
+            if response.is_error:
+                raise TelegramError(f"Telegram {method} failed with HTTP {response.status_code}")
+            if not response.json().get("ok"):
+                raise TelegramError(f"Telegram rejected {method}")
+
     async def send_bargain(self, bargain: Bargain) -> None:
         token, chat_id = self.settings.require_telegram_credentials()
         listing = bargain.listing
@@ -33,15 +50,18 @@ class TelegramClient:
             "<i>Estimate uses current eBay asking prices, not completed sales. "
             "Check authenticity and condition before buying.</i>"
         )
-        response = await self.http.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": False,
-            },
-        )
+        try:
+            response = await self.http.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": False,
+                },
+            )
+        except httpx.HTTPError:
+            raise TelegramError("Telegram sendMessage request failed") from None
         if response.is_error:
             raise TelegramError(f"Telegram sendMessage failed with HTTP {response.status_code}")
         body = response.json()

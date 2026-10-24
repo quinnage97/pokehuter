@@ -55,3 +55,36 @@ def test_telegram_http_failure_raises(settings):
         raise AssertionError("Telegram HTTP failure was accepted")
 
     asyncio.run(run())
+
+
+def test_telegram_access_check_is_read_only(settings):
+    methods = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            await TelegramClient(settings, http).check_access()
+
+    asyncio.run(run())
+    assert methods == ["getMe", "getChat"]
+    assert "sendMessage" not in methods
+
+
+def test_telegram_network_error_does_not_expose_bot_token(settings):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("failed at " + str(request.url), request=request)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            try:
+                await TelegramClient(settings, http).check_access()
+            except TelegramError as exc:
+                assert "telegram-token" not in str(exc)
+                assert exc.__cause__ is None
+                return
+        raise AssertionError("Telegram network failure was accepted")
+
+    asyncio.run(run())

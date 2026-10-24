@@ -51,6 +51,8 @@ def test_decode_signature_header():
 
 def test_search_and_public_key_use_oauth_and_cache(settings):
     settings.ebay_delivery_postcode = "SW1A 1AA"
+    settings.ebay_affiliate_campaign_id = "1234567890"
+    settings.ebay_affiliate_reference_id = "poke hunter"
     requested_paths = []
     public_key_calls = 0
 
@@ -62,7 +64,11 @@ def test_search_and_public_key_use_oauth_and_cache(settings):
         if "/item_summary/search" in request.url.path:
             assert request.headers["x-ebay-c-marketplace-id"] == "EBAY_GB"
             assert request.headers["x-ebay-c-enduserctx"] == (
+                "affiliateCampaignId=1234567890,affiliateReferenceId=poke%20hunter,"
                 "contextualLocation=country%3DGB%2Czip%3DSW1A%201AA"
+            )
+            assert request.url.params["filter"] == (
+                "deliveryCountry:GB,buyingOptions:{FIXED_PRICE},deliveryPostalCode:SW1A 1AA"
             )
             return httpx.Response(
                 200,

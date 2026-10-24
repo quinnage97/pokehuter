@@ -69,27 +69,41 @@ class EbayClient:
 
     async def search(self, query: str) -> list[Listing]:
         token = await self.application_token()
+        self.settings.validate_browse_config()
         headers = {
             "Authorization": f"Bearer {token}",
             "X-EBAY-C-MARKETPLACE-ID": self.settings.ebay_marketplace_id,
             "Accept": "application/json",
         }
+        contexts: list[str] = []
+        if self.settings.ebay_affiliate_campaign_id:
+            contexts.append(f"affiliateCampaignId={self.settings.ebay_affiliate_campaign_id}")
+            if self.settings.ebay_affiliate_reference_id:
+                contexts.append(
+                    "affiliateReferenceId="
+                    f"{quote(self.settings.ebay_affiliate_reference_id, safe='')}"
+                )
         if self.settings.ebay_delivery_postcode:
             location = (
                 f"country={self.settings.ebay_delivery_country},"
                 f"zip={self.settings.ebay_delivery_postcode}"
             )
-            headers["X-EBAY-C-ENDUSERCTX"] = f"contextualLocation={quote(location, safe='')}"
+            contexts.append(f"contextualLocation={quote(location, safe='')}")
+        if contexts:
+            headers["X-EBAY-C-ENDUSERCTX"] = ",".join(contexts)
+        filters = [
+            f"deliveryCountry:{self.settings.ebay_delivery_country}",
+            "buyingOptions:{FIXED_PRICE}",
+        ]
+        if self.settings.ebay_delivery_postcode:
+            filters.append(f"deliveryPostalCode:{self.settings.ebay_delivery_postcode}")
         response = await self.http.get(
             f"{self.settings.ebay_api_base}/buy/browse/v1/item_summary/search",
             headers=headers,
             params={
                 "q": query,
                 "category_ids": self.settings.ebay_category_id,
-                "filter": (
-                    f"deliveryCountry:{self.settings.ebay_delivery_country},"
-                    "buyingOptions:{FIXED_PRICE}"
-                ),
+                "filter": ",".join(filters),
                 "limit": str(self.settings.ebay_result_limit),
             },
         )

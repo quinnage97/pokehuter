@@ -26,3 +26,32 @@ def test_webhook_token_rejects_invalid_characters():
 def test_queries_are_trimmed():
     settings = Settings(_env_file=None, ebay_search_queries=" Charizard , Mew ")
     assert settings.search_queries == ("Charizard", "Mew")
+
+
+@pytest.mark.parametrize("campaign", ["123", "abcdefghij", "12345678901"])
+def test_affiliate_campaign_id_must_be_ten_digits(campaign):
+    settings = Settings(_env_file=None, ebay_affiliate_campaign_id=campaign)
+    with pytest.raises(ValueError, match="10-digit"):
+        settings.validate_browse_config()
+
+
+def test_affiliate_reference_id_has_bounded_length():
+    settings = Settings(_env_file=None, ebay_affiliate_reference_id="x" * 257)
+    with pytest.raises(ValueError, match="256"):
+        settings.validate_browse_config()
+
+
+def test_production_browse_requires_epn_campaign():
+    settings = Settings(_env_file=None, ebay_environment="production")
+    with pytest.raises(ValueError, match="required for production"):
+        settings.validate_browse_config()
+
+
+def test_production_browse_requires_delivery_postcode():
+    settings = Settings(
+        _env_file=None,
+        ebay_environment="production",
+        ebay_affiliate_campaign_id="1234567890",
+    )
+    with pytest.raises(ValueError, match="DELIVERY_POSTCODE"):
+        settings.validate_browse_config()

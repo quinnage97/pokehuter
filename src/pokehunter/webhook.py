@@ -36,11 +36,24 @@ class EbaySignatureVerifier:
         public_key_pem = await self.ebay.get_public_key(header["kid"])
         try:
             signature = base64.b64decode(header["signature"], validate=True)
+            if not signature or len(signature) > 512:
+                return False
             key = serialization.load_pem_public_key(public_key_pem.replace("\\n", "\n").encode())
             if not isinstance(key, ec.EllipticCurvePublicKey):
                 return False
-            key.verify(signature, body, ec.ECDSA(hashes.SHA1()))
-            return True
+            # eBay's reference SDK verifies JSON.stringify(message), so try the exact body and
+            # its compact, insertion-order-preserving JSON representation. This tolerates
+            # semantically irrelevant transport whitespace without weakening payload integrity.
+            payload = parse_json_body(body)
+            canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            candidates = (body,) if canonical == body else (body, canonical)
+            for candidate in candidates:
+                try:
+                    key.verify(signature, candidate, ec.ECDSA(hashes.SHA1()))
+                    return True
+                except InvalidSignature:
+                    continue
+            return False
         except (ValueError, TypeError, InvalidSignature):
             return False
 

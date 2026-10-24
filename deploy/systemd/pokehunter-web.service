@@ -7,9 +7,10 @@ Wants=network-online.target
 Type=simple
 User=pokehunter
 Group=pokehunter
-WorkingDirectory=/opt/pokehunter
+WorkingDirectory=/opt/pokehunter/current
 EnvironmentFile=/etc/pokehunter.env
-ExecStart=/opt/pokehunter/.venv/bin/pokehunter serve --host 127.0.0.1 --port 8088
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/pokehunter/current/.venv/bin/pokehunter serve --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
@@ -20,6 +21,13 @@ ReadWritePaths=/var/lib/pokehunter
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 LockPersonality=true
 MemoryDenyWriteExecute=true
+UMask=0077
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target

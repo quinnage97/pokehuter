@@ -1,90 +1,134 @@
-# Hetzner Ubuntu deployment
+# Hetzner Ubuntu deployment runbook
 
-These instructions are a runbook only. Nothing in this repository deploys automatically.
+This runbook preserves the live eBay endpoint at
+`https://pokehunter-nq.duckdns.org/ebay/deletion` and the existing local listener port `8765`.
+The deployment does not edit or reload Caddy. It never targets a Hermes unit, process, container,
+directory, port, or database.
 
-## Safety boundary: Hermes
+Nothing deploys automatically. The apply path requires the owner to provide an explicit approval
+environment variable after reviewing a read-only preflight.
 
-Hermes AI Command Centre shares the server and must not be disrupted. Before deployment, use
-read-only inspection (`systemctl list-units`, `ss -ltnp`, and the active reverse-proxy config) to
-confirm that port `8088`, user `pokehunter`, directories `/opt/pokehunter` and
-`/var/lib/pokehunter`, and the `pokehunter-*` unit names are unused. If any conflict exists,
-stop and choose new PokéHunter-only names. Never restart, reload, edit, or stop a Hermes unit,
-process, container, file, directory, port, or database.
+## Safety and approval boundaries
 
-Only the existing reverse proxy may need a narrowly scoped route addition. Inspect and validate
-its configuration before changing it. A proxy reload should occur only after explicit approval
-and only if its validation command passes; do not restart Hermes.
+- `deploy/hetzner-deploy.sh preflight` is read-only. It inventories only relevant services,
+  listeners, containers, Caddy validation state, configuration key names, and the public challenge
+  response. It never prints configuration values.
+- `apply` refuses to run unless `POKEHUNTER_DEPLOY_APPROVED=YES` is present and the local worktree
+  is clean.
+- The monitor timer remains disabled unless the separate
+  `POKEHUNTER_ENABLE_MONITOR=YES` approval flag is present.
+- The deployment fingerprints Hermes-related units and containers before and after. Any change
+  causes PokéHunter rollback.
+- Do not submit or modify the eBay Marketplace Account Deletion form as part of deployment.
 
-## 1. Install in isolated paths
+## 1. Read-only server preflight
 
-Run as an administrator after reviewing every command:
+Use a sudo-capable SSH account. This command performs no server mutation:
+
+```bash
+bash deploy/hetzner-deploy.sh preflight <ssh-target>
+```
+
+Confirm that the output identifies the current legacy PokéHunter/eBay webhook service listening on
+`127.0.0.1:8765`, reports the public webhook healthy, and reports Caddy's configuration valid.
+Record the exact legacy systemd unit name; the apply script will refuse to stop any unit unless its
+`ExecStart` identifies it as PokéHunter or `ebay_notifications.py`. If the listener cannot be tied
+to such a unit, stop and inspect it manually.
+
+## 2. Prepare root-owned configuration
+
+Create the dedicated account before writing the configuration:
 
 ```bash
 sudo useradd --system --home /var/lib/pokehunter --shell /usr/sbin/nologin pokehunter
-sudo install -d -o pokehunter -g pokehunter -m 0750 /opt/pokehunter /var/lib/pokehunter
-sudo git clone <REPOSITORY_URL> /opt/pokehunter
-cd /opt/pokehunter
-sudo -u pokehunter python3 -m venv .venv
-sudo -u pokehunter .venv/bin/pip install --require-virtualenv .
-sudo install -o root -g pokehunter -m 0640 .env.example /etc/pokehunter.env
+sudo install -d -o pokehunter -g pokehunter -m 0750 /var/lib/pokehunter
 ```
 
-Edit `/etc/pokehunter.env` as root. Set `DATABASE_PATH=/var/lib/pokehunter/pokehunter.sqlite3`
-and real credentials. Do not put secrets in the repository or systemd unit.
-
-## 2. Install systemd units
+The migration helper reads legacy values on the server, never displays them, and is dry-run by
+default:
 
 ```bash
-sudo install -o root -g root -m 0644 deploy/systemd/pokehunter-web.service /etc/systemd/system/
-sudo install -o root -g root -m 0644 deploy/systemd/pokehunter-monitor.service /etc/systemd/system/
-sudo install -o root -g root -m 0644 deploy/systemd/pokehunter-monitor.timer /etc/systemd/system/
-sudo systemd-analyze verify /etc/systemd/system/pokehunter-*.service /etc/systemd/system/pokehunter-monitor.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now pokehunter-web.service pokehunter-monitor.timer
+sudo python3 deploy/migrate-config.py
 ```
 
-The timer runs every five minutes with jitter. `flock` prevents overlapping monitor runs.
+It prints only missing key names. After filling missing values in the legacy source or a temporary
+root-only source file, explicitly authorize the one-time write:
 
-## 3. Verify locally
+```bash
+sudo POKEHUNTER_CONFIG_MIGRATION_APPROVED=YES python3 deploy/migrate-config.py --write
+```
+
+Alternatively create `/etc/pokehunter.env` manually as `root:pokehunter` with mode `0640`, using
+`.env.example` as the key list. Do not paste secrets into shell arguments, terminal output, Git, or
+this runbook. Required production values include:
+
+- eBay production client ID and secret;
+- the existing 32–80 character eBay verification token;
+- exact endpoint `https://pokehunter-nq.duckdns.org/ebay/deletion`;
+- Telegram bot token and target chat ID;
+- `DATABASE_PATH=/var/lib/pokehunter/pokehunter.sqlite3`;
+- the GB delivery postcode; and
+- the 10-digit EPN campaign ID if the application's production Browse access is tied to EPN.
+
+## 3. Permission checks
+
+The deployment builds an isolated release and runs both checks before changing the live symlink or
+stopping the legacy webhook:
+
+```text
+pokehunter check-ebay
+pokehunter check-telegram
+```
+
+`check-ebay` obtains an application token and performs the configured Browse searches. It does not
+send alerts, write the database, or print tokens or listing details. A successful result proves the
+credentials can call Browse in the configured environment; it does not replace confirmation that
+eBay approved this production bargain-ranking/alert use case or any required EPN agreement.
+
+`check-telegram` calls only `getMe` and `getChat`; it sends no message.
+
+## 4. Approval-gated release
+
+Do not run this command until the owner explicitly approves deployment. Pass the exact legacy unit
+name found during preflight:
+
+```bash
+POKEHUNTER_DEPLOY_APPROVED=YES \
+  bash deploy/hetzner-deploy.sh apply <ssh-target> <legacy-unit.service>
+```
+
+The script creates an immutable release under `/opt/pokehunter/releases/<commit>`, installs pinned
+top-level dependencies into that release, validates the systemd units, runs both permission checks,
+and atomically switches `/opt/pokehunter/current`. It stops only the validated legacy PokéHunter
+unit and starts only `pokehunter-web.service`. The existing Caddy route and port remain unchanged.
+
+After local and public webhook verification passes, the old unit is disabled. Any failure after
+activation restores the previous symlink and restarts the validated legacy unit. Release files are
+left in place for diagnosis; no broad cleanup or restart is performed.
+
+## 5. Separately enable scheduled monitoring
+
+Enabling alerts is a separate operational decision. After reviewing a manual monitor result and
+logs, an administrator may explicitly enable only `pokehunter-monitor.timer` after approval:
+
+```bash
+sudo systemctl enable --now pokehunter-monitor.timer
+```
+
+For a first deployment where monitoring has already received separate approval, set
+`POKEHUNTER_ENABLE_MONITOR=YES` alongside `POKEHUNTER_DEPLOY_APPROVED=YES`. The timer uses `flock`
+to prevent overlapping runs.
+
+## Verification and operations
+
+The automated release verifier checks the atomic release target, the new web unit, local health,
+and the existing public challenge endpoint. Useful read-only follow-up commands are:
 
 ```bash
 systemctl status pokehunter-web.service pokehunter-monitor.timer
-curl --fail --silent http://127.0.0.1:8088/healthz
 journalctl -u pokehunter-web.service -u pokehunter-monitor.service --since today
+curl --fail --silent http://127.0.0.1:8765/healthz
 ```
 
-Trigger one monitored run only after credentials are configured:
-
-```bash
-sudo systemctl start pokehunter-monitor.service
-```
-
-## 4. Add the HTTPS route
-
-Route only `/webhooks/ebay/account-deletion` to `http://127.0.0.1:8088` in the server's
-existing HTTPS reverse proxy. Also route `/healthz` only if it is intentionally protected or
-needed externally. Do not replace the existing virtual host or catch-all, and do not touch
-Hermes routes.
-
-After validating the proxy configuration, obtain explicit approval before reloading it. Confirm
-the public endpoint returns JSON for a test challenge and uses the exact URL in
-`EBAY_DELETION_ENDPOINT`.
-
-## 5. eBay compliance approval gate
-
-Do **not** enter or save the endpoint/token in eBay's developer portal until the owner approves.
-After approval, enter the exact endpoint and token, let eBay perform its GET challenge, then use
-"Send Test Notification" and confirm a `204` plus an `account_deletion_acknowledged` log event.
-Never paste notification payloads or account identifiers into tickets or logs.
-
-## Operations and rollback
-
-Application logs are structured JSON in journald:
-
-```bash
-journalctl -u pokehunter-web.service -u pokehunter-monitor.service -f
-```
-
-To roll back PokéHunter, stop and disable only `pokehunter-web.service` and
-`pokehunter-monitor.timer`, then restore the prior PokéHunter release. Do not issue broad
-container, proxy, or system-wide restart commands.
+Never restart or reload Caddy or Hermes to operate PokéHunter. Never log eBay deletion payloads,
+account identifiers, tokens, or Telegram credentials.

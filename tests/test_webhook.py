@@ -56,6 +56,17 @@ def test_challenge_hash_order_and_json_content_type(settings):
     assert response.headers["content-type"] == "application/json"
     assert response.json() == {"challengeResponse": expected}
 
+    legacy_path_response = asyncio.run(
+        asgi_request(
+            app,
+            "GET",
+            "/ebay/deletion",
+            params={"challenge_code": "challenge"},
+        )
+    )
+    assert legacy_path_response.status_code == 200
+    assert legacy_path_response.json() == {"challengeResponse": expected}
+
 
 def test_valid_notification_returns_204(settings):
     app = create_app(settings, verifier=AcceptingVerifier())
@@ -70,6 +81,17 @@ def test_valid_notification_returns_204(settings):
     )
     assert response.status_code == 204
     assert response.content == b""
+
+    legacy_path_response = asyncio.run(
+        asgi_request(
+            app,
+            "POST",
+            "/ebay/deletion",
+            json=payload(),
+            headers={"X-EBAY-SIGNATURE": "valid"},
+        )
+    )
+    assert legacy_path_response.status_code == 204
 
 
 def test_missing_or_bad_signature_is_rejected(settings):
@@ -94,7 +116,20 @@ def test_missing_or_bad_signature_is_rejected(settings):
     assert bad.status_code == 412
 
 
-def test_signature_verifier_validates_raw_body():
+def test_oversized_signature_header_is_rejected_before_verification(settings):
+    response = asyncio.run(
+        asgi_request(
+            create_app(settings, verifier=AcceptingVerifier()),
+            "POST",
+            "/webhooks/ebay/account-deletion",
+            json=payload(),
+            headers={"X-EBAY-SIGNATURE": "x" * 4097},
+        )
+    )
+    assert response.status_code == 412
+
+
+def test_signature_verifier_validates_raw_and_canonical_body():
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_pem = (
         private_key.public_key()
@@ -114,7 +149,11 @@ def test_signature_verifier_validates_raw_body():
 
     verifier = EbaySignatureVerifier(FakeEbay())  # type: ignore[arg-type]
     assert asyncio.run(verifier.verify(body, header)) is True
-    assert asyncio.run(verifier.verify(body + b" ", header)) is False
+    assert asyncio.run(verifier.verify(body + b" \n", header)) is True
+    assert (
+        asyncio.run(verifier.verify(body.replace(b"notification-1", b"notification-2"), header))
+        is False
+    )
 
 
 def test_challenge_response_is_deterministic():

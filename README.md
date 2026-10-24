@@ -6,7 +6,7 @@ alerts. It also exposes the eBay Marketplace Account Deletion endpoint required 
 developer compliance.
 
 The project is intentionally isolated from other services on the host. Its supplied systemd
-units use the `pokehunter` user, `/opt/pokehunter`, `/var/lib/pokehunter`, port `8088`, and
+units use the `pokehunter` user, `/opt/pokehunter`, `/var/lib/pokehunter`, port `8765`, and
 service names prefixed with `pokehunter-`. They do not read, write, restart, or otherwise
 interact with Hermes AI Command Centre.
 
@@ -48,6 +48,13 @@ Run one monitoring cycle:
 .venv/bin/pokehunter monitor
 ```
 
+Validate external access without writing scanner state or sending a message:
+
+```bash
+.venv/bin/pokehunter check-ebay
+.venv/bin/pokehunter check-telegram
+```
+
 Run the webhook locally (the eBay portal still requires a public HTTPS endpoint):
 
 ```bash
@@ -67,9 +74,10 @@ Configure the exact public URL, including path and any trailing slash, as
 `EBAY_DELETION_ENDPOINT`. The value must exactly match the URL entered in eBay's portal. Set
 `EBAY_VERIFICATION_TOKEN` to the same 32–80 character token entered there.
 
-- `GET /webhooks/ebay/account-deletion?challenge_code=...` returns the required SHA-256
+- `GET /ebay/deletion?challenge_code=...` returns the required SHA-256
   `challengeResponse` JSON.
-- `POST /webhooks/ebay/account-deletion` requires JSON and a valid `X-EBAY-SIGNATURE`.
+- `POST /ebay/deletion` requires JSON and a valid `X-EBAY-SIGNATURE`. The longer
+  `/webhooks/ebay/account-deletion` path is retained as an alias.
 - eBay public keys are fetched using app OAuth and cached for one hour.
 - Valid deletion messages receive `204 No Content`; invalid signatures receive `412`.
 - PokéHunter does not store usernames, public user IDs, EIAS tokens, seller details, or deletion
@@ -95,6 +103,8 @@ inventory is synthetic.
 | `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` | eBay production or sandbox app credentials |
 | `EBAY_ENVIRONMENT` | `production` or `sandbox` |
 | `EBAY_DELIVERY_POSTCODE` | Recommended destination postcode for accurate calculated shipping |
+| `EBAY_AFFILIATE_CAMPAIGN_ID` | 10-digit EPN campaign ID for production affiliate tracking |
+| `EBAY_AFFILIATE_REFERENCE_ID` | Optional EPN reference ID, maximum 256 characters |
 | `EBAY_DELETION_ENDPOINT` | Exact public HTTPS webhook URL |
 | `EBAY_VERIFICATION_TOKEN` | Portal token, 32–80 allowed characters |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alert destination |
@@ -110,5 +120,6 @@ With strict English filtering, listings without an English language aspect or th
 
 ## Production deployment
 
-See [docs/deployment.md](docs/deployment.md). Deployment, eBay portal submission, and any
-reverse-proxy change are intentionally manual approval gates.
+See [docs/deployment.md](docs/deployment.md). The prepared deployment preserves the existing
+public URL, Caddy route, and local port `8765`; deployment, monitor activation, and eBay portal
+submission are separate manual approval gates.

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     ebay_delivery_postcode: str | None = None
     ebay_category_id: str = "183454"
     ebay_search_queries: str = "Charizard pokemon card,Mew pokemon card"
+    ebay_affiliate_campaign_id: str | None = None
+    ebay_affiliate_reference_id: str | None = "pokehunter"
     ebay_deletion_endpoint: str | None = None
     ebay_verification_token: SecretStr | None = None
 
@@ -60,6 +62,21 @@ class Settings(BaseSettings):
         if not self.ebay_client_id or not self.ebay_client_secret:
             raise ValueError("EBAY_CLIENT_ID and EBAY_CLIENT_SECRET are required")
         return self.ebay_client_id, self.ebay_client_secret.get_secret_value()
+
+    def validate_browse_config(self) -> None:
+        if self.ebay_affiliate_campaign_id and not re.fullmatch(
+            r"\d{10}", self.ebay_affiliate_campaign_id
+        ):
+            raise ValueError("EBAY_AFFILIATE_CAMPAIGN_ID must be a 10-digit EPN campaign ID")
+        if self.ebay_affiliate_reference_id and len(self.ebay_affiliate_reference_id) > 256:
+            raise ValueError("EBAY_AFFILIATE_REFERENCE_ID cannot exceed 256 characters")
+        if self.ebay_environment.lower() == "production":
+            if not self.ebay_affiliate_campaign_id:
+                raise ValueError(
+                    "EBAY_AFFILIATE_CAMPAIGN_ID is required for production Browse API use"
+                )
+            if not self.ebay_delivery_postcode:
+                raise ValueError("EBAY_DELIVERY_POSTCODE is required for production Browse API use")
 
     def require_telegram_credentials(self) -> tuple[str, str]:
         if not self.telegram_bot_token or not self.telegram_chat_id:
