@@ -54,6 +54,7 @@ def test_challenge_hash_order_and_json_content_type(settings):
     ).hexdigest()
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
+    assert response.headers["cache-control"] == "no-store"
     assert response.json() == {"challengeResponse": expected}
 
     legacy_path_response = asyncio.run(

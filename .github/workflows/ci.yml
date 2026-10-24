@@ -22,6 +22,7 @@ jobs:
       - run: ruff format --check .
       - run: python -m compileall -q src deploy/*.py tests
       - run: bash -n deploy/*.sh
+      - run: shellcheck deploy/*.sh
       - run: pytest -W error --cov=pokehunter --cov-report=term-missing --cov-fail-under=80
       - name: Verify production dependency constraints
         run: |

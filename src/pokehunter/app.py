@@ -81,7 +81,8 @@ def create_app(
             logger.error("eBay webhook is not configured", extra={"event": "webhook_config_error"})
             raise HTTPException(status_code=503, detail="Webhook is not configured") from exc
         return JSONResponse(
-            {"challengeResponse": challenge_response(challenge_code, token, endpoint)}
+            {"challengeResponse": challenge_response(challenge_code, token, endpoint)},
+            headers={"Cache-Control": "no-store"},
         )
 
     @app.post("/ebay/deletion", include_in_schema=False)

@@ -101,7 +101,13 @@ def main() -> None:
         raise SystemExit(asyncio.run(check_ebay_access(settings)))
     if args.command == "check-telegram":
         raise SystemExit(asyncio.run(check_telegram_access(settings)))
-    uvicorn.run("pokehunter.app:app", host=args.host, port=args.port, proxy_headers=True)
+    uvicorn.run(
+        "pokehunter.app:app",
+        host=args.host,
+        port=args.port,
+        proxy_headers=True,
+        server_header=False,
+    )
 
 
 if __name__ == "__main__":
