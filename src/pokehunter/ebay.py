@@ -228,9 +228,20 @@ def decode_signature_header(value: str) -> dict[str, str]:
         parsed = json.loads(decoded)
         if not isinstance(parsed, dict):
             raise ValueError
-        key_id, signature = parsed["kid"], parsed["signature"]
-        if not isinstance(key_id, str) or not isinstance(signature, str):
+        algorithm = parsed["alg"]
+        key_id = parsed["kid"]
+        signature = parsed["signature"]
+        digest = parsed["digest"]
+        fields = (algorithm, key_id, signature, digest)
+        if not all(isinstance(item, str) and item for item in fields):
             raise ValueError
-        return {"kid": key_id, "signature": signature}
+        if algorithm.casefold() != "ecdsa" or digest.upper() != "SHA1":
+            raise ValueError
+        return {
+            "alg": algorithm,
+            "kid": key_id,
+            "signature": signature,
+            "digest": digest,
+        }
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
         raise ValueError("Malformed X-EBAY-SIGNATURE header") from exc

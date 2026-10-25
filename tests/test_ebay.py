@@ -46,8 +46,15 @@ def test_oauth_token_is_cached(settings):
 
 
 def test_decode_signature_header():
-    value = base64.b64encode(b'{"kid":"key-1","signature":"c2ln"}').decode()
-    assert decode_signature_header(value) == {"kid": "key-1", "signature": "c2ln"}
+    value = base64.b64encode(
+        b'{"alg":"ecdsa","kid":"key-1","signature":"c2ln","digest":"SHA1"}'
+    ).decode()
+    assert decode_signature_header(value) == {
+        "alg": "ecdsa",
+        "kid": "key-1",
+        "signature": "c2ln",
+        "digest": "SHA1",
+    }
 
 
 def test_search_and_public_key_use_oauth_and_cache(settings):
@@ -115,6 +122,26 @@ def test_decode_signature_rejects_malformed_header():
         assert "Malformed" in str(exc)
     else:
         raise AssertionError("malformed signature was accepted")
+
+
+def test_decode_signature_rejects_unapproved_algorithm_or_digest():
+    for algorithm, digest in (("rsa", "SHA1"), ("ecdsa", "SHA256")):
+        value = base64.b64encode(
+            json.dumps(
+                {
+                    "alg": algorithm,
+                    "kid": "key-1",
+                    "signature": "c2ln",
+                    "digest": digest,
+                }
+            ).encode()
+        ).decode()
+        try:
+            decode_signature_header(value)
+        except ValueError as exc:
+            assert "Malformed" in str(exc)
+        else:
+            raise AssertionError("unsupported signature parameters were accepted")
 
 
 def test_parse_listing_rejects_unknown_or_wrong_currency_shipping():
