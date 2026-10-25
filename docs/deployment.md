@@ -60,14 +60,16 @@ may run it from a root-owned copy beneath a root-owned, non-group/world-writable
 refuses sources that are symlinks, non-regular, non-root-owned, or group/world-writable:
 
 ```bash
-sudo POKEHUNTER_BOOTSTRAP_APPROVED=YES bash deploy/bootstrap-root.sh
+sudo env POKEHUNTER_BOOTSTRAP_APPROVED=YES \
+  /bin/bash /root/pokehunter-bootstrap-<reviewed-commit>/deploy/bootstrap-root.sh
 ```
 
 The bootstrap creates two unprivileged runtime accounts and a separate non-login build account,
 installs root-owned helpers under
 `/usr/local/libexec/pokehunter`, installs the three fixed PokéHunter units without enabling,
-starting, or reloading systemd, and validates `/etc/sudoers.d/pokehunter-deploy`. Its complete
-standing sudo policy is:
+starting, or reloading systemd, creates the empty root-only recovery directory
+`/var/backups/pokehunter`, and validates `/etc/sudoers.d/pokehunter-deploy`. It does not read or
+change `/home/commandadmin/pokehunter`. Its complete standing sudo policy is:
 
 ```text
 pokehunter-deploy ALL=(root) NOPASSWD:NOSETENV: /usr/local/sbin/pokehunter-control preflight
@@ -102,9 +104,10 @@ Confirm that it identifies the current legacy PokéHunter/eBay webhook service o
 Record the exact legacy unit name. Apply refuses to stop a unit unless its `ExecStart` identifies
 it as PokéHunter or `ebay_notifications.py` and its process owns port 8765.
 
-The preflight also reports whether `/opt/pokehunter/data/ebay_deletions.sqlite3` exists. The legacy
-implementation stores eBay usernames and user IDs there. Unless there is a documented legal
-retention requirement, this personal data should be deleted at a separately approved cutover.
+The preflight reports the legacy root, configuration metadata, and whether
+`/home/commandadmin/pokehunter/data/ebay_deletions.sqlite3` exists. The legacy implementation
+stores eBay usernames and user IDs there. Unless there is a documented legal retention
+requirement, this personal data should be deleted at a separately approved, verified cutover.
 
 Check the existing production keyset without writing server files or showing credentials:
 
@@ -112,25 +115,52 @@ Check the existing production keyset without writing server files or showing cre
 bash deploy/hetzner-deploy.sh probe-ebay <ssh-target>
 ```
 
-This reads the legacy `/opt/pokehunter/.env` in memory and reports only OAuth/Browse HTTP status,
-the number of returned summaries, and whether the EPN campaign and delivery postcode are present.
-It is not a substitute for explicit eBay production-access confirmation. A failed or unconfirmed
-production probe blocks deployment.
+This reads the legacy `/home/commandadmin/pokehunter/.env` directly in memory. It requires a
+non-symlink regular file owned by `commandadmin` or root with mode `0600`; it does not copy the
+file to `/opt`. It reports only OAuth/Browse HTTP status, the number of returned summaries, and
+whether the EPN campaign and delivery postcode are present. It is not a substitute for explicit
+eBay production-access confirmation. A failed or unconfirmed production probe blocks deployment.
 
-## 3. Prepare root-owned configuration
+## 3. Reconcile, snapshot, and prepare root-owned configuration
+
+The old and new layouts remain side by side:
+
+```text
+/home/commandadmin/pokehunter   existing installation; left in place for rollback
+/etc/pokehunter.env             new root-only runtime configuration
+/opt/pokehunter/releases/...    new immutable releases
+/opt/pokehunter/current         new atomic release pointer
+```
+
+No `.env` file is created under `/opt/pokehunter`. After bootstrap, but only with separate
+administrator approval, create a root-only recovery manifest before configuration migration:
+
+```bash
+sudo env POKEHUNTER_MIGRATION_PREP_APPROVED=YES \
+  /usr/bin/python3 -I \
+  /usr/local/libexec/pokehunter/prepare-legacy-migration.py
+```
+
+The manifest is stored in a newly created mode-`0700` directory below
+`/var/backups/pokehunter`. It records non-secret ownership, mode, size and timestamps, hashes the
+legacy entrypoint and unit, and saves a mode-`0600` copy of only `pokehunter-ebay.service`. It does
+not copy or hash `.env`, and it does not copy or hash the deletion database. The legacy project,
+`.env`, service and database are not changed.
 
 The migration helper reads legacy values on the server, never displays them, and is dry-run by
 default:
 
 ```bash
-sudo python3 deploy/migrate-config.py
+sudo /usr/bin/python3 -I /usr/local/libexec/pokehunter/migrate-config.py
 ```
 
-It prints only missing key names. After filling missing values in the legacy source or a temporary
-root-only source file, explicitly authorize the one-time write:
+It reads only the fixed legacy `.env` and optional legacy verification-token file and prints only
+missing key names. After securely adding any missing values to the legacy `.env`, explicitly
+authorize the one-time, no-overwrite write:
 
 ```bash
-sudo POKEHUNTER_CONFIG_MIGRATION_APPROVED=YES python3 deploy/migrate-config.py --write
+sudo env POKEHUNTER_CONFIG_MIGRATION_APPROVED=YES \
+  /usr/bin/python3 -I /usr/local/libexec/pokehunter/migrate-config.py --write
 ```
 
 Alternatively create `/etc/pokehunter.env` manually as `root:root` with mode `0600`, using
@@ -218,7 +248,39 @@ and its SQLite sidecars. It never traverses directories, deletes unrelated data,
 Hetzner snapshot or backup. Existing backups remain untouched and should follow the owner's normal
 retention policy; do not delete an entire backup merely to remove this database.
 
-## 6. Separately enable scheduled monitoring
+## 6. Recovery and rollback
+
+Before cutover, recovery is deliberately simple: `pokehunter-ebay.service`, its project at
+`/home/commandadmin/pokehunter`, and its `.env` remain active and unchanged. Creating
+`/etc/pokehunter.env` has no effect on the legacy service. The root-only manifest and copied unit
+provide an audit point without making another credential or personal-data copy.
+
+During cutover, the deployment trap automatically stops the new PokéHunter units, restores the
+previous `/opt/pokehunter/current` target if one existed, and restarts the validated legacy unit
+whenever verification fails. The deletion database is not touched until the new local and public
+webhook checks pass, the challenge hash matches, and the Hermes fingerprint is unchanged.
+
+For a separately approved manual rollback after a successful cutover, stop only the new
+PokéHunter units and restore only the known legacy unit:
+
+```bash
+sudo systemctl disable --now pokehunter-monitor.timer pokehunter-web.service
+sudo systemctl enable --now pokehunter-ebay.service
+```
+
+Then verify `127.0.0.1:8765` and the public challenge endpoint. Do not restart or reload Caddy or
+Hermes. The deployment never rewrites `pokehunter-ebay.service`; if an unrelated later action did,
+the exact pre-migration copy can be restored from the selected
+`/var/backups/pokehunter/legacy-migration-*/pokehunter-ebay.service`, followed by
+`systemctl daemon-reload` and the legacy-unit start.
+
+The legacy deletion database is the intentional exception to recoverability: once the separately
+approved purge runs after verified cutover, its personal identifiers and SQLite sidecars are not
+backed up by this process and cannot be restored from this recovery manifest. The legacy code and
+configuration remain recoverable. Hetzner backups are never edited or deleted; any older external
+backup containing those identifiers remains subject to the owner's existing retention policy.
+
+## 7. Separately enable scheduled monitoring
 
 Enabling alerts is a separate operational decision and must wait for confirmed production eBay
 access. After reviewing a manual monitor result and logs, an administrator may explicitly enable

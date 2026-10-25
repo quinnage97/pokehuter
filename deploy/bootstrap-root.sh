@@ -35,7 +35,7 @@ done
 helpers=(
   remote-deploy.sh server-preflight.sh verify-release.sh probe-existing-ebay.py
   purge-legacy-deletion-db.py validate-release.py authorize-release-root.sh
-  run-release-check.py
+  run-release-check.py migrate-config.py prepare-legacy-migration.py
 )
 units=(pokehunter-web.service pokehunter-monitor.service pokehunter-monitor.timer)
 
@@ -73,10 +73,11 @@ require_regular_target_or_absent() {
 
 require_directory_target_or_absent() {
   local path="$1"
-  if [[ -e "${path}" || -L "${path}" ]] \
-    && [[ ! -d "${path}" || -L "${path}" ]]; then
-    echo "refusing non-directory bootstrap target: ${path}"
-    exit 1
+  if [[ -e "${path}" || -L "${path}" ]]; then
+    if [[ ! -d "${path}" || -L "${path}" ]] || ! root_owned_not_writable "${path}"; then
+      echo "refusing non-directory or non-root-controlled bootstrap target: ${path}"
+      exit 1
+    fi
   fi
 }
 
@@ -90,7 +91,7 @@ done
 require_root_directory "${SCRIPT_DIR}/systemd"
 require_root_regular "${SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]}")"
 for trusted_parent in /usr/local /usr/local/sbin /etc/systemd/system /etc/sudoers.d \
-  /opt /var/cache /var/lib; do
+  /opt /var/backups /var/cache /var/lib; do
   require_root_directory "${trusted_parent}"
 done
 if [[ -e /usr/local/libexec || -L /usr/local/libexec ]]; then
@@ -124,7 +125,8 @@ for unit in "${units[@]}"; do
   fi
 done
 for path in "${LIBEXEC}" /opt/pokehunter /opt/pokehunter/releases \
-  /var/cache/pokehunter /var/cache/pokehunter/staging /var/lib/pokehunter; do
+  /var/cache/pokehunter /var/cache/pokehunter/staging /var/lib/pokehunter \
+  /var/backups/pokehunter; do
   require_directory_target_or_absent "${path}"
 done
 require_regular_target_or_absent /usr/local/sbin/pokehunter-control
@@ -182,6 +184,7 @@ done
 
 install -d -o root -g root -m 0755 "${LIBEXEC}" /opt/pokehunter /opt/pokehunter/releases
 install -d -o root -g root -m 0700 /var/cache/pokehunter /var/cache/pokehunter/staging
+install -d -o root -g root -m 0700 /var/backups/pokehunter
 install -d -o pokehunter -g pokehunter -m 0750 /var/lib/pokehunter
 install -o root -g root -m 0755 "${SCRIPT_DIR}/pokehunter-control" /usr/local/sbin/pokehunter-control
 for helper in "${helpers[@]}"; do

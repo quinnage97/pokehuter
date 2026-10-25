@@ -24,6 +24,8 @@ def test_bootstrap_grants_only_fixed_control_command():
     assert "require_regular_target_or_absent" in bootstrap
     assert 'require_regular_target_or_absent "${destination}"' in bootstrap
     assert 'require_root_regular "${source}"' in bootstrap
+    assert "prepare-legacy-migration.py" in bootstrap
+    assert "/var/backups/pokehunter" in bootstrap
 
 
 def test_passwordless_dispatcher_replaces_environment_and_checks_helpers():
@@ -115,3 +117,25 @@ def test_ebay_probe_disables_proxies_redirects_and_environment_credentials():
     assert "ProxyHandler({})" in probe
     assert "NoRedirectHandler()" in probe
     assert "os.environ" not in probe
+
+
+def test_legacy_paths_match_the_existing_commandadmin_installation():
+    for filename in (
+        "migrate-config.py",
+        "pokehunter-control",
+        "probe-existing-ebay.py",
+        "purge-legacy-deletion-db.py",
+        "remote-deploy.sh",
+        "server-preflight.sh",
+    ):
+        content = (ROOT / "deploy" / filename).read_text()
+        assert "/opt/pokehunter/.env" not in content
+        assert "/opt/pokehunter/data/ebay_deletions.sqlite3" not in content
+    control = (ROOT / "deploy" / "pokehunter-control").read_text()
+    assert "/home/commandadmin/pokehunter/.env" in control
+
+
+def test_migration_helpers_are_not_in_standing_sudo_policy():
+    bootstrap = (ROOT / "deploy" / "bootstrap-root.sh").read_text()
+    for helper in ("migrate-config.py", "prepare-legacy-migration.py"):
+        assert f"pokehunter-control {helper}" not in bootstrap

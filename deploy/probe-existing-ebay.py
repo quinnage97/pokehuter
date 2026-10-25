@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import json
 import os
+import pwd
 import re
 import shlex
 import stat
@@ -29,23 +31,36 @@ DIRECT_OPENER = build_opener(ProxyHandler({}), NoRedirectHandler())
 
 def read_env(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
-    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    parent_descriptor = os.open(
+        path.parent, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+    )
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ValueError("legacy environment is not a regular file")
-        if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o600:
-            raise ValueError(
-                "legacy environment must be owned by the effective user with mode 0600"
-            )
-        if metadata.st_size > MAX_ENV_BYTES:
-            raise ValueError("legacy environment is too large")
-        with os.fdopen(descriptor, encoding="utf-8", errors="strict") as source:
-            descriptor = -1
-            contents = source.read(MAX_ENV_BYTES + 1)
+        descriptor = os.open(
+            path.name,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("legacy environment is not a regular file")
+            allowed_owners = {0, os.geteuid()}
+            with contextlib.suppress(KeyError):
+                allowed_owners.add(pwd.getpwnam("commandadmin").pw_uid)
+            if metadata.st_uid not in allowed_owners or stat.S_IMODE(metadata.st_mode) != 0o600:
+                raise ValueError(
+                    "legacy environment must be owned by root or commandadmin with mode 0600"
+                )
+            if metadata.st_size > MAX_ENV_BYTES:
+                raise ValueError("legacy environment is too large")
+            with os.fdopen(descriptor, encoding="utf-8", errors="strict") as source:
+                descriptor = -1
+                contents = source.read(MAX_ENV_BYTES + 1)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
     finally:
-        if descriptor >= 0:
-            os.close(descriptor)
+        os.close(parent_descriptor)
     if len(contents.encode("utf-8")) > MAX_ENV_BYTES:
         raise ValueError("legacy environment is too large")
     for raw_line in contents.splitlines():
@@ -83,7 +98,7 @@ def request_json(request: Request) -> tuple[int, dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--env", type=Path, default=Path("/opt/pokehunter/.env"))
+    parser.add_argument("--env", type=Path, default=Path("/home/commandadmin/pokehunter/.env"))
     args = parser.parse_args()
     try:
         values = read_env(args.env)

@@ -9,6 +9,9 @@ export TMPDIR=/tmp
 
 readonly PORT="8765"
 readonly PUBLIC_URL="https://pokehunter-nq.duckdns.org/ebay/deletion"
+readonly LEGACY_ROOT="/home/commandadmin/pokehunter"
+readonly LEGACY_ENV="${LEGACY_ROOT}/.env"
+readonly LEGACY_DB="${LEGACY_ROOT}/data/ebay_deletions.sqlite3"
 
 echo "PokéHunter server preflight (read-only)"
 echo "host=$(hostname -f 2>/dev/null || hostname) port=${PORT}"
@@ -58,16 +61,28 @@ else
   echo "caddy_config=not-validated-without-privilege"
 fi
 
-if [[ -e /opt/pokehunter ]]; then
-  echo "app_path=present"
+if [[ -d "${LEGACY_ROOT}" && ! -L "${LEGACY_ROOT}" ]]; then
+  echo "legacy_app_path=present"
 else
-  echo "app_path=absent-or-not-visible"
+  echo "legacy_app_path=absent-or-not-visible"
 fi
 
-if [[ -e /opt/pokehunter/data/ebay_deletions.sqlite3 ]]; then
-  echo "legacy_deletion_database=present bytes=$(stat -c '%s' /opt/pokehunter/data/ebay_deletions.sqlite3)"
+if [[ -f "${LEGACY_ENV}" && ! -L "${LEGACY_ENV}" ]]; then
+  echo "legacy_config=present owner=$(stat -c '%U:%G' "${LEGACY_ENV}") mode=$(stat -c '%a' "${LEGACY_ENV}")"
+else
+  echo "legacy_config=absent-or-not-a-regular-file"
+fi
+
+if [[ -f "${LEGACY_DB}" && ! -L "${LEGACY_DB}" ]]; then
+  echo "legacy_deletion_database=present owner=$(stat -c '%U:%G' "${LEGACY_DB}") mode=$(stat -c '%a' "${LEGACY_DB}") bytes=$(stat -c '%s' "${LEGACY_DB}")"
 else
   echo "legacy_deletion_database=absent-or-not-visible"
+fi
+
+if [[ -d /opt/pokehunter && ! -L /opt/pokehunter ]]; then
+  echo "new_app_path=present"
+else
+  echo "new_app_path=absent-or-not-visible"
 fi
 
 if [[ -f /etc/pokehunter.env && ! -L /etc/pokehunter.env ]] \

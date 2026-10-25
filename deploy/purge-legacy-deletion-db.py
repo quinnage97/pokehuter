@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import pwd
 import sqlite3
 import stat
 from pathlib import Path
 
-LEGACY_DATABASE = Path("/opt/pokehunter/data/ebay_deletions.sqlite3")
+LEGACY_DATABASE = Path("/home/commandadmin/pokehunter/data/ebay_deletions.sqlite3")
 EXPECTED_COLUMNS = {"notification_id", "username", "user_id", "received_at"}
 
 
@@ -17,15 +19,18 @@ def purge_database(path: Path) -> None:
         return
     parent_metadata = path.parent.lstat()
     database_metadata = path.lstat()
+    allowed_owners = {0, os.geteuid()}
+    with contextlib.suppress(KeyError):
+        allowed_owners.add(pwd.getpwnam("commandadmin").pw_uid)
     if (
         not stat.S_ISDIR(parent_metadata.st_mode)
-        or parent_metadata.st_uid != os.geteuid()
+        or parent_metadata.st_uid not in allowed_owners
         or parent_metadata.st_mode & 0o022
     ):
         raise RuntimeError("refusing legacy purge: parent directory is not controlled")
     if (
         not stat.S_ISREG(database_metadata.st_mode)
-        or database_metadata.st_uid != os.geteuid()
+        or database_metadata.st_uid not in allowed_owners
         or database_metadata.st_mode & 0o022
     ):
         raise RuntimeError("refusing legacy purge: database is not a controlled regular file")

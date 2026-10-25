@@ -74,6 +74,6 @@ def test_probe_dispatch_has_fixed_path_and_arguments(monkeypatch):
 
     assert captured == {
         "path": "/trusted/probe-existing-ebay.py",
-        "arguments": ["--env", "/opt/pokehunter/.env"],
+        "arguments": ["--env", "/home/commandadmin/pokehunter/.env"],
         "python": True,
     }

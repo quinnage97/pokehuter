@@ -67,7 +67,7 @@ def main() -> None:
     if arguments == ["probe-ebay"]:
         execute(
             trusted_helper("probe-existing-ebay.py"),
-            ["--env", "/opt/pokehunter/.env"],
+            ["--env", "/home/commandadmin/pokehunter/.env"],
             python=True,
         )
     if len(arguments) == 7 and arguments[0] == "apply":
