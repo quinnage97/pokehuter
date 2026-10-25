@@ -129,6 +129,7 @@ With strict English filtering, listings without an English language aspect or th
 
 ## Production deployment
 
-See [docs/deployment.md](docs/deployment.md). The prepared deployment preserves the existing
-public URL, Caddy route, and local port `8765`; deployment, monitor activation, and eBay portal
-submission are separate manual approval gates.
+Deployment tooling and the production runbook are reviewed separately from this application
+core. The rollout preserves the existing public URL, Caddy route, and local port `8765`;
+configuration, deployment, data cleanup, Telegram delivery, and monitor activation remain
+separate manual approval gates.
