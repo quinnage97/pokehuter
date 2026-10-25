@@ -1,0 +1,79 @@
+#!/usr/bin/python3 -I
+"""Finite, clean-environment root dispatcher for PokéHunter deployment operations."""
+
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from pathlib import Path
+
+LIBEXEC = Path("/usr/local/libexec/pokehunter")
+SAFE_ENV = {
+    "HOME": "/root",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+    "TMPDIR": "/tmp",
+}
+
+
+def fail(message: str, status: int = 1) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(status)
+
+
+def trusted_helper(name: str) -> str:
+    path = LIBEXEC / name
+    try:
+        target = path.lstat()
+    except OSError as exc:
+        fail(f"missing privileged helper: {name} ({type(exc).__name__})")
+    directory_path = LIBEXEC
+    while directory_path != Path("/"):
+        try:
+            directory = directory_path.lstat()
+        except OSError as exc:
+            fail(f"missing privileged helper directory ({type(exc).__name__})")
+        if (
+            not stat.S_ISDIR(directory.st_mode)
+            or directory.st_uid != 0
+            or directory.st_mode & 0o022
+        ):
+            fail(f"privileged helper path is not root-controlled: {directory_path}")
+        directory_path = directory_path.parent
+    if not stat.S_ISREG(target.st_mode) or target.st_uid != 0 or target.st_mode & 0o022:
+        fail(f"privileged helper is not a root-controlled regular file: {name}")
+    return str(path)
+
+
+def execute(path: str, arguments: list[str], *, python: bool = False) -> None:
+    if python:
+        executable = "/usr/bin/python3"
+        argv = [executable, "-I", path, *arguments]
+    else:
+        executable = "/bin/bash"
+        argv = [executable, path, *arguments]
+    os.execve(executable, argv, SAFE_ENV)
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        fail("pokehunter-control must run through its narrow sudo rule")
+
+    arguments = sys.argv[1:]
+    if arguments == ["preflight"]:
+        execute(trusted_helper("server-preflight.sh"), [])
+    if arguments == ["probe-ebay"]:
+        execute(
+            trusted_helper("probe-existing-ebay.py"),
+            ["--env", "/home/commandadmin/pokehunter/.env"],
+            python=True,
+        )
+    if len(arguments) == 7 and arguments[0] == "apply":
+        execute(trusted_helper("remote-deploy.sh"), arguments[1:])
+    fail("allowed actions: preflight, probe-ebay, apply", 2)
+
+
+if __name__ == "__main__":
+    main()
