@@ -1,0 +1,40 @@
+[Unit]
+Description=PokéHunter eBay bargain scan
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pokehunter
+Group=pokehunter
+WorkingDirectory=/opt/pokehunter/current
+EnvironmentFile=/etc/pokehunter.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+UnsetEnvironment=EBAY_VERIFICATION_TOKEN
+ExecStart=/usr/bin/flock -n /var/lib/pokehunter/monitor.lock /opt/pokehunter/current/.venv/bin/pokehunter monitor
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pokehunter
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=0077
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CPUWeight=20
+IOWeight=20
+MemoryMax=256M
+TasksMax=64
+Nice=10
+RuntimeMaxSec=4min
