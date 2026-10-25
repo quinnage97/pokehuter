@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python -m compileall -q src deploy/*.py tests && python -m py_compile deploy/pokehunter-control
+      - run: bash -n deploy/*.sh
+      - run: shellcheck deploy/*.sh
+      - run: pytest -W error --cov=pokehunter --cov-report=term-missing --cov-fail-under=80
+      - name: Verify production dependency constraints
+        run: |
+          python -m venv "$RUNNER_TEMP/pokehunter-prod"
+          PIP_CONSTRAINT="$GITHUB_WORKSPACE/deploy/constraints.txt" \
+            "$RUNNER_TEMP/pokehunter-prod/bin/pip" install \
+            --constraint "$GITHUB_WORKSPACE/deploy/constraints.txt" .
+          "$RUNNER_TEMP/pokehunter-prod/bin/pip" check
