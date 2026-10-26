@@ -1,0 +1,12 @@
+# Replace your existing pokehunter-nq.duckdns.org block with this, then:
+#   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+pokehunter-nq.duckdns.org {
+    # eBay account-deletion webhook: keep sending it to the existing service.
+    handle /ebay/* {
+        reverse_proxy 127.0.0.1:8765
+    }
+    # Everything else is the deals website.
+    handle {
+        reverse_proxy 127.0.0.1:8766
+    }
+}

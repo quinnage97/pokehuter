@@ -3,152 +3,80 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import tempfile
+from pathlib import Path
 
 import httpx
 import uvicorn
 
+from .alerts import Telegram
+from .catalog import refresh_catalog
 from .config import Settings
-from .database import Database
-from .discovery import is_target_listing
+from .db import Database
 from .ebay import EbayClient
-from .logging import configure_logging
-from .market import score_listing
-from .monitor import Monitor
-from .telegram import TelegramClient
+from .scanner import Scanner
 
 
-async def run_monitor(settings: Settings) -> int:
-    timeout = httpx.Timeout(30.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as http:
-        monitor = Monitor(
-            settings,
-            Database(settings.database_path),
-            EbayClient(settings, http),
-            TelegramClient(settings, http),
-        )
-        result = await monitor.run()
-    return 1 if result.errors else 0
-
-
-async def check_ebay_access(settings: Settings) -> int:
-    """Verify production OAuth and Browse access without sending alerts or storing listings."""
-    timeout = httpx.Timeout(30.0, connect=10.0)
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as http:
-            client = EbayClient(settings, http)
-            pools = []
-            discovered = 0
-            for query in settings.search_queries:
-                found = await client.search(query)
-                discovered += len(found)
-                pools.append(
-                    [
-                        listing
-                        for listing in found
-                        if is_target_listing(
-                            listing,
-                            currency=settings.ebay_currency,
-                            require_english=settings.require_english,
-                        )
-                    ]
+async def _once(settings: Settings, what: str) -> int:
+    # `check` uses a throwaway database so it can run as root without touching live data.
+    db = Database(
+        Path(tempfile.mkdtemp()) / "check.sqlite3" if what == "check" else settings.database_path
+    )
+    async with httpx.AsyncClient(headers={"User-Agent": "PokeHunter/1.0"}) as http:
+        needs_catalog = what == "scan" and not db.get_kv("catalog_updated_at")
+        if what == "refresh" or needs_catalog:
+            print(f"Card list: {await refresh_catalog(db, settings, http)} cards")
+        if what == "scan":
+            scanner = Scanner(
+                db, settings, EbayClient(settings, http, db), Telegram(settings, http)
+            )
+            print(json.dumps(await scanner.scan(), indent=2))
+        if what == "check":
+            ok = True
+            try:
+                found = await EbayClient(settings, http, db).search(
+                    "Charizard", sort="newlyListed", limit=5
                 )
-        eligible = sum(len(pool) for pool in pools)
-        if not discovered:
-            raise RuntimeError("eBay Browse returned no usable listings for the configured queries")
-        if not eligible:
-            raise RuntimeError("eBay Browse returned no eligible English target listings")
-        candidates = 0
-        seen = set()
-        for pool in pools:
-            for listing in pool:
-                if listing.item_id in seen:
-                    continue
-                seen.add(listing.item_id)
-                bargain = score_listing(
-                    listing,
-                    pool,
-                    min_comparables=settings.min_comparables,
-                    similarity_threshold=settings.title_similarity_threshold,
-                )
-                if bargain and (
-                    bargain.discount_percent >= settings.min_discount_percent
-                    and bargain.estimated_savings >= settings.min_savings
-                    and bargain.score >= settings.min_bargain_score
-                ):
-                    candidates += 1
-        print(
-            json.dumps(
-                {
-                    "status": "ok",
-                    "environment": settings.ebay_environment,
-                    "queries": len(pools),
-                    "parsed_listings": discovered,
-                    "eligible_listings": eligible,
-                    "bargain_candidates": candidates,
-                    "affiliate_tracking": bool(settings.ebay_affiliate_campaign_id),
-                },
-                separators=(",", ":"),
-            )
-        )
-        return 0
-    except Exception as exc:
-        print(
-            json.dumps(
-                {"status": "error", "error_type": type(exc).__name__},
-                separators=(",", ":"),
-            )
-        )
-        return 1
-
-
-async def check_telegram_access(settings: Settings) -> int:
-    """Verify bot and chat access without sending a message."""
-    timeout = httpx.Timeout(15.0, connect=10.0)
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as http:
-            await TelegramClient(settings, http).check_access()
-        print('{"status":"ok"}')
-        return 0
-    except Exception as exc:
-        print(
-            json.dumps(
-                {"status": "error", "error_type": type(exc).__name__},
-                separators=(",", ":"),
-            )
-        )
-        return 1
+                print(f"eBay OK: {len(found)} listings, e.g. {found[0].title if found else '-'}")
+            except Exception as exc:  # noqa: BLE001
+                ok = False
+                print(f"eBay PROBLEM: {exc}")
+            try:
+                await Telegram(settings, http).send("✅ PokéHunter test message")
+                print("Telegram OK: test message sent")
+            except Exception as exc:  # noqa: BLE001
+                ok = False
+                print(f"Telegram PROBLEM: {exc}")
+            return 0 if ok else 1
+    return 0
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="PokéHunter eBay bargain monitor")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("monitor", help="run one discovery and alert cycle")
-    subparsers.add_parser(
-        "check-ebay", help="verify OAuth and Browse permissions without sending alerts"
-    )
-    subparsers.add_parser(
-        "check-telegram", help="verify bot and chat access without sending a message"
-    )
-    serve = subparsers.add_parser("serve", help="serve health and eBay webhook endpoints")
+    parser = argparse.ArgumentParser(prog="pokehunter", description="Pokémon card deal catcher")
+    sub = parser.add_subparsers(dest="command", required=True)
+    serve = sub.add_parser("serve", help="run the website and the 15-minute scanner")
     serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8088)
+    serve.add_argument("--port", type=int, default=8766)
+    sub.add_parser("refresh", help="download the card list and prices now")
+    sub.add_parser("scan", help="run one eBay scan now and print the result")
+    sub.add_parser("check", help="test the eBay keys and send a Telegram test message")
+    parser.add_argument(
+        "--env-file", help="read settings from this file (e.g. /etc/pokehunter.env)"
+    )
     args = parser.parse_args()
 
-    settings = Settings()
-    configure_logging(settings.log_level)
-    if args.command == "monitor":
-        raise SystemExit(asyncio.run(run_monitor(settings)))
-    if args.command == "check-ebay":
-        raise SystemExit(asyncio.run(check_ebay_access(settings)))
-    if args.command == "check-telegram":
-        raise SystemExit(asyncio.run(check_telegram_access(settings)))
-    uvicorn.run(
-        "pokehunter.app:app",
-        host=args.host,
-        port=args.port,
-        proxy_headers=True,
-        server_header=False,
+    settings = Settings(_env_file=args.env_file) if args.env_file else Settings()
+    logging.basicConfig(
+        level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    if args.command == "serve":
+        from .web import create_app
+
+        uvicorn.run(create_app(settings), host=args.host, port=args.port, proxy_headers=True)
+    else:
+        raise SystemExit(asyncio.run(_once(settings, args.command)))
 
 
 if __name__ == "__main__":

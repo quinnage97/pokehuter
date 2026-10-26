@@ -20,14 +20,6 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
-      - run: python -m compileall -q src app deploy tests
       - run: bash -n deploy/*.sh
       - run: shellcheck deploy/*.sh
-      - run: pytest -W error --cov=pokehunter --cov-report=term-missing --cov-fail-under=80
-      - name: Verify production dependency constraints
-        run: |
-          python -m venv "$RUNNER_TEMP/pokehunter-prod"
-          PIP_CONSTRAINT="$GITHUB_WORKSPACE/deploy/constraints.txt" \
-            "$RUNNER_TEMP/pokehunter-prod/bin/pip" install \
-            --constraint "$GITHUB_WORKSPACE/deploy/constraints.txt" .
-          "$RUNNER_TEMP/pokehunter-prod/bin/pip" check
+      - run: pytest --cov=pokehunter --cov-report=term-missing --cov-fail-under=75

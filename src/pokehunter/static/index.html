@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PokéHunter</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">🔥 PokéHunter <span class="sub">Charizard &amp; Mew deal catcher</span></div>
+    <div id="status" class="status">Loading…</div>
+    <nav>
+      <button data-tab="deals" class="active">Deals <span id="deal-count" class="pill"></span></button>
+      <button data-tab="checklist">Checklist</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-deals">
+      <div id="setup-warning" class="notice" hidden></div>
+      <div id="watch-wrap" hidden>
+        <h2>⭐ Priority watch</h2>
+        <p class="hint">Cheapest copy we've seen for each starred card, even if it isn't a deal yet.</p>
+        <div id="watch" class="watch"></div>
+      </div>
+      <h2>Deals</h2>
+      <div id="deals" class="deals"></div>
+    </section>
+
+    <section id="tab-checklist" hidden>
+      <div id="progress" class="progress-wrap"></div>
+      <div class="filters">
+        <div class="seg" id="poke-filter"></div>
+        <input id="search" type="search" placeholder="Search name or set…">
+        <label><input type="checkbox" id="hide-owned" checked> Hide cards we have</label>
+        <label><input type="checkbox" id="only-priority"> Only starred</label>
+        <label><input type="checkbox" id="show-hidden"> Show skipped</label>
+      </div>
+      <p class="hint">Tick the versions you already own. ⭐ a card to search for it every scan and
+        alert on smaller discounts. Set an "alert at £" price to get a ping whenever one is listed at or below it.</p>
+      <div id="checklist"></div>
+    </section>
+
+    <section id="tab-settings" hidden>
+      <h2>Deal rules</h2>
+      <form id="prefs" class="prefs">
+        <label>Alert when at least <input name="min_discount_pct" type="number" min="0" max="90">% under fair price</label>
+        <label>…or for ⭐ starred cards, <input name="priority_discount_pct" type="number" min="0" max="90">% under</label>
+        <label>Minimum saving £<input name="min_saving_gbp" type="number" min="0"></label>
+        <label>Accept MP/HP (played) copies for cards worth over £<input name="played_ok_above_gbp" type="number" min="0"></label>
+        <label><input name="allow_damaged" type="checkbox"> Accept damaged copies</label>
+        <label>Ignore sellers with fewer than <input name="min_seller_feedback" type="number" min="0"> feedback</label>
+        <label><input name="alerts_enabled" type="checkbox"> Send Telegram alerts</label>
+        <label>Max alerts per scan <input name="max_alerts_per_scan" type="number" min="1"></label>
+        <label>Cards searched individually per scan <input name="targeted_per_scan" type="number" min="0" max="100"></label>
+        <label>Price guide
+          <select name="price_source">
+            <option value="cardmarket">Cardmarket (EU, closest to UK prices)</option>
+            <option value="tcgplayer">TCGplayer (US)</option>
+          </select>
+        </label>
+        <button type="submit" class="primary">Save</button> <span id="prefs-saved" class="hint"></span>
+      </form>
+      <p class="hint">"Fair price" = Near Mint market price × condition: NM 100%, LP 85%, MP 70%,
+        HP 55%, damaged 40%, not stated 80%. Prices are a guide. Always check photos before buying.</p>
+
+      <h2>Actions</h2>
+      <div class="actions">
+        <button id="scan-now">Scan eBay now</button>
+        <button id="refresh-cat">Update card list &amp; prices</button>
+        <button id="test-alert">Send test alert</button>
+      </div>
+      <h2>System</h2>
+      <pre id="system" class="system"></pre>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS cards (
+    id TEXT PRIMARY KEY,
+    pokemon TEXT NOT NULL,
+    name TEXT NOT NULL,
+    local_id TEXT NOT NULL,
+    set_id TEXT NOT NULL,
+    set_name TEXT NOT NULL,
+    set_official INTEGER,
+    release_date TEXT,
+    serie_name TEXT,
+    rarity TEXT,
+    image TEXT,
+    pricing_json TEXT,
+    updated_at TEXT NOT NULL
+);
+
+-- One checklist entry per card *variant* (normal / holo / reverse / 1st edition): a master
+-- set needs every one of them.
+CREATE TABLE IF NOT EXISTS items (
+    id TEXT PRIMARY KEY,
+    card_id TEXT NOT NULL REFERENCES cards(id),
+    variant TEXT NOT NULL,
+    owned INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 0,
+    target_price REAL,
+    market_gbp REAL,
+    price_source TEXT,
+    last_searched_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS listings (
+    item_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    image TEXT,
+    price REAL NOT NULL,
+    shipping REAL NOT NULL,
+    shipping_known INTEGER NOT NULL DEFAULT 1,
+    total REAL NOT NULL,
+    condition TEXT NOT NULL,
+    seller TEXT,
+    feedback_score INTEGER,
+    feedback_pct REAL,
+    listed_at TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    match_item_id TEXT,
+    market_gbp REAL,
+    fair_gbp REAL,
+    discount_pct REAL,
+    is_deal INTEGER NOT NULL DEFAULT 0,
+    warning TEXT,
+    alert_status TEXT,
+    alerted_at TEXT,
+    dismissed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS listings_deals ON listings(is_deal, last_seen);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    ebay_calls INTEGER NOT NULL DEFAULT 0,
+    listings_seen INTEGER NOT NULL DEFAULT 0,
+    deals INTEGER NOT NULL DEFAULT 0,
+    alerts INTEGER NOT NULL DEFAULT 0,
+    error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS api_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+"""
+
+# Defaults for the options shown on the website's Settings tab.
+DEFAULT_PREFS: dict[str, Any] = {
+    "min_discount_pct": 20,  # alert when this far below the condition-adjusted price
+    "priority_discount_pct": 5,  # looser threshold for starred cards
+    "min_saving_gbp": 2,
+    "played_ok_above_gbp": 15,  # MP/HP copies are only considered for cards worth this much
+    "allow_damaged": False,
+    "min_seller_feedback": 5,
+    "alerts_enabled": True,
+    "max_alerts_per_scan": 10,
+    "targeted_per_scan": 30,
+    "price_source": "cardmarket",  # or "tcgplayer"
+}
+
+
+def now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+class Database:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = threading.Lock()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.executescript(SCHEMA)
+        self._conn.commit()
+
+    @contextmanager
+    def tx(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            try:
+                yield self._conn
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def query(self, sql: str, params: tuple | dict = ()) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(row) for row in self._conn.execute(sql, params).fetchall()]
+
+    def one(self, sql: str, params: tuple | dict = ()) -> dict[str, Any] | None:
+        rows = self.query(sql, params)
+        return rows[0] if rows else None
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # key/value store -------------------------------------------------------------------
+    def get_kv(self, key: str, default: Any = None) -> Any:
+        row = self.one("SELECT value FROM kv WHERE key=?", (key,))
+        return json.loads(row["value"]) if row else default
+
+    def set_kv(self, key: str, value: Any) -> None:
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO kv(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, json.dumps(value)),
+            )
+
+    def prefs(self) -> dict[str, Any]:
+        stored = self.get_kv("prefs", {}) or {}
+        return {**DEFAULT_PREFS, **{k: v for k, v in stored.items() if k in DEFAULT_PREFS}}
+
+    def update_prefs(self, changes: dict[str, Any]) -> dict[str, Any]:
+        current = self.prefs()
+        for key, value in changes.items():
+            if key not in DEFAULT_PREFS:
+                continue
+            default = DEFAULT_PREFS[key]
+            if isinstance(default, bool):
+                current[key] = bool(value)
+            elif isinstance(default, int):
+                current[key] = max(0, int(float(value)))
+            elif key == "price_source" and value in ("cardmarket", "tcgplayer"):
+                current[key] = value
+        self.set_kv("prefs", current)
+        return current
+
+    # eBay call budget ------------------------------------------------------------------
+    def calls_today(self) -> int:
+        row = self.one("SELECT calls FROM api_usage WHERE day=?", (now_iso()[:10],))
+        return row["calls"] if row else 0
+
+    def count_call(self) -> None:
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO api_usage(day, calls) VALUES(?, 1) "
+                "ON CONFLICT(day) DO UPDATE SET calls=calls+1",
+                (now_iso()[:10],),
+            )
