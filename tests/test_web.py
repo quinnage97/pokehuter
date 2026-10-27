@@ -76,3 +76,17 @@ def test_all_listings_view(catalog_db, settings):
     with client(settings) as c:
         body = c.get("/api/deals?everything=true").json()
         assert body["deals"] == [] and "watch" in body
+
+
+def test_choose_card_picture(catalog_db, settings):
+    with client(settings) as c:
+        photos = c.get("/api/cards/base1-4/photos").json()
+        assert photos["official"][0] == "https://assets.tcgdex.net/en/base/base1/4/high.webp"
+        assert c.post("/api/cards/base1-4/image", json={"url": "http://x"}).status_code == 400
+        r = c.post("/api/cards/base1-4/image", json={"url": "https://img.example/mew.png"})
+        assert r.json() == {"image_override": "https://img.example/mew.png"}
+        items = c.get("/api/cards").json()["items"]
+        assert next(i for i in items if i["card_id"] == "base1-4")["image_override"]
+        c.post("/api/cards/base1-4/image", json={"url": ""})
+        items = c.get("/api/cards").json()["items"]
+        assert next(i for i in items if i["card_id"] == "base1-4")["image_override"] is None

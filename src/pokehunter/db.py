@@ -91,6 +91,7 @@ MIGRATIONS = [
     ("items", "ebay_comps", "INTEGER"),
     ("cards", "image_alt", "TEXT"),
     ("cards", "custom", "INTEGER NOT NULL DEFAULT 0"),
+    ("cards", "image_override", "TEXT"),
     ("listings", "images_json", "TEXT"),
     ("listings", "photo_verdict", "TEXT"),
     ("listings", "photo_reason", "TEXT"),

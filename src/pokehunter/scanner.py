@@ -81,19 +81,22 @@ def evaluate(
 
 
 def ebay_medians(db: Database, min_comps: int = 4) -> dict[str, tuple[float, int]]:
-    """Typical asking price (median, delivered) of each card version on eBay this week,
-    from unplayed / unstated-condition copies."""
+    """Typical eBay price of each card version this week, from unplayed or unstated copies.
+
+    Asking prices run high (overpriced listings sit unsold), so this is the lower quartile,
+    which tracks what cards actually sell for far better than the median."""
     cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
     rows = db.query(
         "SELECT match_item_id, total FROM listings WHERE last_seen >= ? AND dismissed = 0"
-        " AND condition IN ('NM', 'LP', '?')",
+        " AND condition IN ('NM', 'LP', '?')"
+        " AND COALESCE(photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')",
         (cutoff,),
     )
     grouped: dict[str, list[float]] = {}
     for row in rows:
         grouped.setdefault(row["match_item_id"], []).append(row["total"])
     return {
-        item: (round(statistics.median(totals), 2), len(totals))
+        item: (round(statistics.quantiles(totals, n=4, method="inclusive")[0], 2), len(totals))
         for item, totals in grouped.items()
         if len(totals) >= min_comps
     }
@@ -323,7 +326,13 @@ class Scanner:
         rows = self.db.query("SELECT * FROM listings WHERE last_seen >= ?", (cutoff,))
         updates, new_deals = [], []
         for row in rows:
-            item = items.get(row["match_item_id"])
+            # Re-match with today's rules, so improvements (e.g. holo detection) apply to
+            # listings already stored.
+            match, _ = match_title(row["title"], cards)
+            item_id = f"{match.card.id}:{match.variant}" if match else row["match_item_id"]
+            if item_id not in items:
+                item_id = row["match_item_id"]
+            item = items.get(item_id)
             if not item:
                 continue
             listing = Listing(
@@ -339,7 +348,6 @@ class Scanner:
                 feedback_pct=row["feedback_pct"],
                 listed_at=row["listed_at"],
             )
-            match, _ = match_title(row["title"], cards)
             verdict = evaluate(listing, row["condition"], item, prefs)
             photo_ok = row["photo_verdict"] not in REJECT
             is_deal = bool(match) and verdict.is_deal and photo_ok
@@ -353,6 +361,7 @@ class Scanner:
                     verdict.discount,
                     int(is_deal),
                     "; ".join(notes) or None,
+                    item_id,
                     row["item_id"],
                 )
             )
@@ -369,7 +378,7 @@ class Scanner:
         with self.db.tx() as c:
             c.executemany(
                 "UPDATE listings SET market_gbp=?, fair_gbp=?, discount_pct=?, is_deal=?,"
-                " warning=? WHERE item_id=?",
+                " warning=?, match_item_id=? WHERE item_id=?",
                 updates,
             )
         return new_deals
@@ -461,7 +470,8 @@ class Scanner:
             SELECT l.item_id AS listing_id, l.*, i.variant, i.priority, i.target_price,
                    i.ebay_median_gbp, i.ebay_comps,
                    c.name AS card_name, c.set_name, c.local_id, c.set_official, c.rarity,
-                   c.release_date, c.image AS card_image, c.image_alt, c.custom, c.pokemon
+                   c.release_date, c.image AS card_image, c.image_alt, c.custom, c.pokemon,
+                   c.image_override
             FROM listings l
             JOIN items i ON i.id = l.match_item_id
             JOIN cards c ON c.id = i.card_id
@@ -483,7 +493,8 @@ class Scanner:
             """
             SELECT i.id AS item, i.variant, i.market_gbp, i.target_price,
                    c.name AS card_name, c.set_name, c.local_id, c.image AS card_image,
-                   c.image_alt, c.custom, l.item_id AS listing_id, l.title, l.url, l.total,
+                   c.image_alt, c.custom, c.image_override, l.item_id AS listing_id, l.title,
+                   l.url, l.total,
                    l.condition, l.fair_gbp, l.discount_pct, MIN(l.total) AS cheapest
             FROM items i JOIN cards c ON c.id = i.card_id
             LEFT JOIN listings l ON l.match_item_id = i.id AND l.last_seen >= ?

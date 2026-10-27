@@ -60,8 +60,9 @@ def test_scan_finds_deal_and_alerts_once(catalog_db, settings):
     assert result["errors"] == []
     deals = scanner.deals()
     assert [d["listing_id"] for d in deals] == ["1"]
-    assert deals[0]["fair_gbp"] == 258.4 and deals[0]["total"] == 150.0
-    assert deals[0]["ebay_median_gbp"] == 305.0 and deals[0]["ebay_comps"] == 4
+    # eBay lower quartile of 150/300/310/331 is £262.50, below the £304 guide, so it's used.
+    assert deals[0]["ebay_median_gbp"] == 262.5 and deals[0]["ebay_comps"] == 4
+    assert deals[0]["fair_gbp"] == round(262.5 * 0.85, 2) and deals[0]["total"] == 150.0
     assert len(fake.messages) == 1 and "Charizard" in fake.messages[0]
     # Sweep queries per Pokémon plus targeted card searches.
     assert fake.searches[:2] == ["Charizard", "Mew"]

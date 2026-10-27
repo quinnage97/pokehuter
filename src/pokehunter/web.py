@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 import secrets
 from contextlib import asynccontextmanager
@@ -198,10 +199,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
                    i.market_gbp, i.price_source, i.ebay_median_gbp, i.ebay_comps,
                    c.pokemon, c.name, c.local_id, c.set_id, c.set_name, c.set_official,
                    c.release_date, c.serie_name, c.rarity, c.image, c.image_alt, c.custom,
-                   (SELECT l.image FROM listings l JOIN items i2 ON i2.id = l.match_item_id
-                    WHERE i2.card_id = c.id AND l.image IS NOT NULL
-                      AND COALESCE(l.photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')
-                    ORDER BY l.last_seen DESC LIMIT 1) AS ebay_image
+                   c.image_override
             FROM items i JOIN cards c ON c.id = i.card_id
             ORDER BY c.release_date, c.set_id, CAST(c.local_id AS INTEGER), c.local_id,
                      CASE i.variant WHEN 'firstEdition' THEN 0 WHEN 'holo' THEN 1
@@ -250,6 +248,51 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
                 [(f"{card_id}:{v}", card_id, v) for v in variants],
             )
         return {"id": card_id}
+
+    @app.get("/api/cards/{card_id}/photos")
+    async def card_photos(request: Request, card_id: str) -> dict[str, Any]:
+        """Picture choices for a card: the official images plus recent eBay photos."""
+        e = engine(request)
+        card = e.db.one("SELECT image, image_alt, custom FROM cards WHERE id=?", (card_id,))
+        if not card:
+            raise HTTPException(404, "Unknown card")
+        official = []
+        if card["image"]:
+            official.append(card["image"] if card["custom"] else f"{card['image']}/high.webp")
+        if card["image_alt"]:
+            official.append(card["image_alt"])
+        rows = e.db.query(
+            """
+            SELECT l.images_json, l.image FROM listings l JOIN items i ON i.id = l.match_item_id
+            WHERE i.card_id = ? AND COALESCE(l.photo_verdict, '') NOT IN
+                ('fake', 'not_a_card', 'wrong_card')
+            ORDER BY l.last_seen DESC LIMIT 6
+            """,
+            (card_id,),
+        )
+        ebay: list[str] = []
+        for row in rows:
+            for url in json.loads(row["images_json"] or "[]") or [row["image"]]:
+                if url and url not in ebay:
+                    ebay.append(url)
+        return {"official": official, "ebay": ebay[:12]}
+
+    @app.post("/api/cards/{card_id}/image")
+    async def choose_image(
+        request: Request, card_id: str, body: dict[str, Any] = Body(...)
+    ) -> dict[str, Any]:
+        """Pick the picture shown for a card (empty to go back to the default)."""
+        e = engine(request)
+        url = str(body.get("url") or "").strip() or None
+        if url and not url.startswith("https://"):
+            raise HTTPException(400, "Picture links must start with https://")
+        with e.db.tx() as c:
+            updated = c.execute(
+                "UPDATE cards SET image_override=? WHERE id=?", (url, card_id)
+            ).rowcount
+        if not updated:
+            raise HTTPException(404, "Unknown card")
+        return {"image_override": url}
 
     @app.delete("/api/cards/custom/{card_id}")
     async def delete_card(request: Request, card_id: str) -> dict[str, bool]:

@@ -113,6 +113,16 @@ def test_base_set_holo_matches_unlimited():
     assert match.card.id == "base1-4" and match.variant == "holo" and match.condition == "LP"
 
 
+def test_holo_in_title_picks_holo_version():
+    both = CardRef(
+        "bw-mew", "Mew", "Mew-EX", "46", "Dragons Exalted", 124, {"normal": None, "holo": 30.0}
+    )
+    match, _ = match_title("Pokemon Mew EX Basic Holo Psychic 46/124", [both])
+    assert match.variant == "holo"
+    match, _ = match_title("Mew EX 46/124 non holo", [both])
+    assert match.variant == "normal"
+
+
 def test_first_edition_detected():
     match, _ = match_title("1st Edition Charizard 4/102 Base Set Holo", CARDS)
     assert match.variant == "firstEdition"

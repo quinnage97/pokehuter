@@ -82,9 +82,15 @@ def variant_pricing(card: dict[str, Any]) -> dict[str, Any]:
 
 def guess_alt_image(set_id: str, local_id: str) -> str:
     """Best-guess pokemontcg.io image, used when TCGdex has no picture.
-    TCGdex 'sv03.5' is 'sv3pt5' there; numbers lose their leading zeros."""
-    ptcg_set = set_id.replace(".5", "pt5")
-    ptcg_set = ptcg_set[:2] + ptcg_set[2:].lstrip("0") if ptcg_set.startswith("sv0") else ptcg_set
+    Set codes mostly match, except half sets: TCGdex 'sv03.5' is 'sv3pt5' there and
+    'swsh3.5' (Champion's Path) is 'swsh35'. Numbers lose their leading zeros."""
+    ptcg_set = set_id
+    for tcgdex, ptcg in (("swsh3.5", "swsh35"), ("swsh4.5", "swsh45")):
+        if ptcg_set.startswith(tcgdex):
+            ptcg_set = ptcg + ptcg_set[len(tcgdex) :]
+    ptcg_set = ptcg_set.replace(".5", "pt5")
+    if ptcg_set.startswith("sv0"):
+        ptcg_set = "sv" + ptcg_set[2:].lstrip("0")
     number = (local_id.lstrip("0") or "0") if local_id.isdigit() else local_id
     return f"https://images.pokemontcg.io/{ptcg_set}/{number}.png"
 

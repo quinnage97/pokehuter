@@ -215,6 +215,10 @@ def match_title(title: str, cards: list[CardRef]) -> tuple[Match | None, str]:
     card = min(candidates, key=value)
     if wanted_variant:
         variant = wanted_variant
+    elif re.search(r"\bnon[ -]?holo\b", title, re.I) and "normal" in card.variants:
+        variant = "normal"
+    elif re.search(r"\bholo\b", title, re.I) and "holo" in card.variants:
+        variant = "holo"
     else:
         base = [v for v in card.variants if v in ("holo", "normal")] or list(card.variants)
         variant = card.cheapest(base)

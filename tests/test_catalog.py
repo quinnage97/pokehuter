@@ -67,3 +67,10 @@ def test_alt_image_guess():
     assert guess_alt_image("sv03.5", "199") == "https://images.pokemontcg.io/sv3pt5/199.png"
     assert guess_alt_image("swsh4", "025") == "https://images.pokemontcg.io/swsh4/25.png"
     assert guess_alt_image("swsh11tg", "TG03") == "https://images.pokemontcg.io/swsh11tg/TG03.png"
+
+
+def test_alt_image_half_sets():
+    from pokehunter.catalog import guess_alt_image
+
+    assert guess_alt_image("swsh3.5", "074") == "https://images.pokemontcg.io/swsh35/74.png"
+    assert guess_alt_image("swsh12.5", "GG69") == "https://images.pokemontcg.io/swsh12pt5/GG69.png"

@@ -52,13 +52,13 @@ function until(iso) {
 }
 
 // ---------------------------------------------------------------- pictures
-// Each picture has fallbacks: TCGdex → pokemontcg.io → a real eBay photo → a placeholder.
+// Each picture has fallbacks: your chosen picture → TCGdex → pokemontcg.io → a placeholder.
 function cardSources(c, size = "low") {
   const out = [];
+  if (c.image_override) out.push(c.image_override);
   const img = c.card_image ?? c.image; // listings carry the eBay photo in .image
   if (img) out.push(c.custom ? img : `${img}/${size}.webp`);
   if (c.image_alt) out.push(c.image_alt);
-  if (c.ebay_image) out.push(c.ebay_image);
   return out;
 }
 function picture(sources, label, cls = "") {
@@ -467,7 +467,8 @@ $("#checklist").addEventListener("click", async (e) => {
     const prices = state.items.filter((i) => i.card_id === card.card_id).map((v) =>
       `<div>${esc(v.variant_label)}: guide ${gbp(v.market_gbp)}${v.ebay_median_gbp ? ` · eBay typical ${gbp(v.ebay_median_gbp)} (${v.ebay_comps} listed)` : ""}${v.owned ? " · ✓ owned" : ""}</div>`).join("");
     showPicture(picture(cardSources(card, "high"), card.name), card.name,
-      `<p class="hint">${esc(card.set_name)} · #${esc(card.local_id)}${card.set_official ? "/" + card.set_official : ""}${card.rarity ? " · " + esc(card.rarity) : ""}</p>${prices}`);
+      `<p class="hint">${esc(card.set_name)} · #${esc(card.local_id)}${card.set_official ? "/" + card.set_official : ""}${card.rarity ? " · " + esc(card.rarity) : ""}</p>${prices}
+       <p><button class="btn small" onclick="choosePicture('${esc(card.card_id)}')">🖼 Wrong picture? Change it</button></p>`);
     return;
   }
   const btn = e.target.closest("button[data-f]");
@@ -484,6 +485,34 @@ $("#checklist").addEventListener("click", async (e) => {
     renderChecklist();
   }
 });
+
+// pick a different picture for a card
+window.choosePicture = async (cardId) => {
+  const card = state.items.find((i) => i.card_id === cardId);
+  const { official, ebay } = await api(`/api/cards/${encodeURIComponent(cardId)}/photos`);
+  const thumb = (url) => `<button class="pick" data-url="${esc(url)}"><img src="${esc(url)}" alt="" loading="lazy" onerror="this.closest('.pick').remove()"></button>`;
+  showPicture("", `Choose a picture for ${card.name}`, `
+    <p class="hint">Tap the right picture. It's saved for everyone using the site.</p>
+    ${official.length ? `<h3 class="pick-h">Official pictures</h3><div class="picks">${official.map(thumb).join("")}</div>` : ""}
+    ${ebay.length ? `<h3 class="pick-h">Photos from eBay listings</h3><div class="picks">${ebay.map(thumb).join("")}</div>` : `<p class="hint">No eBay photos of this card yet.</p>`}
+    <h3 class="pick-h">Or paste a picture link</h3>
+    <div class="frow"><input id="pick-url" type="url" placeholder="https://…"><button class="btn small" data-url-input>Use link</button></div>
+    ${card.image_override ? `<button class="btn ghost small" data-url="">Go back to the default picture</button>` : ""}`);
+  $("#card-dialog").onclick = async (e) => {
+    if (e.target.id === "card-dialog") return e.target.close();
+    const b = e.target.closest("[data-url],[data-url-input]");
+    if (!b) return;
+    const url = b.hasAttribute("data-url-input") ? $("#pick-url").value.trim() : b.dataset.url;
+    try {
+      await api(`/api/cards/${encodeURIComponent(cardId)}/image`, { url });
+      state.items.filter((i) => i.card_id === cardId).forEach((i) => (i.image_override = url || null));
+      $("#card-dialog").close();
+      $("#card-dialog").onclick = null;
+      toast(url ? "Picture updated 🖼" : "Back to the default picture");
+      renderChecklist();
+    } catch (err) { toast(err.message); }
+  };
+};
 
 // add a missing card
 $("#add-card").addEventListener("click", () => {
