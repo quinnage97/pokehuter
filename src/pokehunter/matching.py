@@ -46,12 +46,18 @@ _EXCLUDED = re.compile(
     r"|digital|code card|tcg ?live|online code|jumbo|oversized?|lots?|bundle|job ?lot|binder"
     r"|sleeves?|deck ?box|playmat|art ?print|poster|sticker|figure|plush|pin badge|coin"
     r"|acrylic|framed?|keychain|key ?ring|choose|pick|select|you choose|empty|booster"
-    r"|blister|tin|etb|elite trainer|collection box|mystery|repack|bulk|set of|x\d+)\b",
+    r"|blister|tin|etb|elite trainer|collection box|mystery|repack|bulk|set of|x\d+"
+    # Non-card items and lucky dips that use a real card's name and number in the title.
+    r"|skins?|vinyl|decals?|fan ?art|plastic|novelty|hand ?made|inspired|tribute|unofficial"
+    r"|not (?:real|original|genuine)|lotter(?:y|ia)|raffle|giveaway|packs|god pack"
+    r"|pack opening|pacchett\w*|read description|printed|art card|canvas|magnets?|patch"
+    r"|phone case|display (?:case|stand|frame)|wooden|engraved|etched|carbon)\b",
     re.I,
 )
 _NON_ENGLISH = re.compile(
     r"\b(japanese|japan|jpn|jp|korean|kor|chinese|s-chinese|t-chinese|german|deutsch|french"
-    r"|fran[cç]ais|italian|italiano|spanish|espa[nñ]ol|portuguese|dutch|thai|indonesian)\b",
+    r"|fran[cç]ais|italian|italiano|spanish|espa[nñ]ol|portuguese|dutch|thai|indonesian"
+    r"|ita|ger|deu|fra|fr|esp|spa|por|kr|cn|chn|jap|sc|tc)\b",
     re.I,
 )
 _FIRST_ED = re.compile(r"\b(1st|first)[\s-]*ed(ition|\.)?\b", re.I)

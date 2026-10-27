@@ -90,6 +90,8 @@ DEFAULT_PREFS: dict[str, Any] = {
     "min_discount_pct": 20,  # alert when this far below the condition-adjusted price
     "priority_discount_pct": 5,  # looser threshold for starred cards
     "min_saving_gbp": 2,
+    # Far cheaper than this is almost never the real card (fakes, stickers, lucky dips).
+    "max_discount_pct": 75,
     "played_ok_above_gbp": 15,  # MP/HP copies are only considered for cards worth this much
     "allow_damaged": False,
     "min_seller_feedback": 5,

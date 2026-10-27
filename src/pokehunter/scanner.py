@@ -51,6 +51,7 @@ def evaluate(
         and fair - listing.total >= prefs["min_saving_gbp"]
     )
     by_target = target is not None and listing.total <= target
+    too_good = discount is not None and discount > prefs["max_discount_pct"]
 
     warnings = []
     if discount is not None and discount >= 60:
@@ -58,7 +59,7 @@ def evaluate(
     if not listing.shipping_known:
         warnings.append("Postage not listed (assumed £2)")
     return Verdict(
-        is_deal=bool(condition_ok and seller_ok and (by_market or by_target)),
+        is_deal=bool(condition_ok and seller_ok and not too_good and (by_market or by_target)),
         fair=fair,
         discount=discount,
         warning="; ".join(warnings) or None,
@@ -207,6 +208,7 @@ class Scanner:
                     }
                 )
 
+        self.revalidate(cards, prefs)
         alerts = await self._send_alerts(new_deals, prefs, errors)
         deal_count = len(self.deals())
         with self.db.tx() as c:
@@ -238,6 +240,21 @@ class Scanner:
             "alerts": alerts,
             "errors": errors,
         }
+
+    def revalidate(self, cards: list, prefs: dict[str, Any]) -> None:
+        """Drop stored deals that today's filters would reject (e.g. after a rule update)."""
+        rows = self.db.query("SELECT item_id, title, discount_pct FROM listings WHERE is_deal = 1")
+        stale = [
+            row["item_id"]
+            for row in rows
+            if match_title(row["title"], cards)[0] is None
+            or (row["discount_pct"] or 0) > prefs["max_discount_pct"]
+        ]
+        if stale:
+            with self.db.tx() as c:
+                c.executemany(
+                    "UPDATE listings SET is_deal = 0 WHERE item_id = ?", [(i,) for i in stale]
+                )
 
     async def _send_alerts(
         self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], errors: list[str]

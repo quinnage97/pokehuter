@@ -112,6 +112,7 @@ def test_evaluate_rules():
         "played_ok_above_gbp": 15,
         "allow_damaged": False,
         "min_seller_feedback": 5,
+        "max_discount_pct": 75,
     }
     item = {"market_gbp": 100.0, "target_price": None, "priority": 0}
     listing = parse_item(ebay_item("x", "t", "79.00", shipping="0"), "GBP")
@@ -122,7 +123,21 @@ def test_evaluate_rules():
     low_feedback = parse_item(
         ebay_item("y", "t", "10.00", seller={"username": "new", "feedbackScore": 0}), "GBP"
     )
-    assert not evaluate(low_feedback, "NM", item, prefs).is_deal
+    assert not evaluate(low_feedback, "NM", {**item, "market_gbp": 12.0}, prefs).is_deal
+    too_cheap = parse_item(ebay_item("z", "t", "10.00", shipping="0"), "GBP")
+    assert not evaluate(too_cheap, "NM", item, prefs).is_deal  # 90% under: not a real card
+
+
+def test_old_junk_deals_are_cleared(catalog_db, settings):
+    with catalog_db.tx() as c:
+        c.execute(
+            "INSERT INTO listings (item_id, title, url, price, shipping, total, condition,"
+            " first_seen, last_seen, match_item_id, discount_pct, is_deal, alert_status)"
+            " VALUES ('junk', 'Charizard 4/102 CREDIT CARD SKIN', 'u', 1, 1, 2, '?',"
+            " 'x', strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now'), 'base1-4:holo', 99, 1, 'sent')"
+        )
+    _, scanner = run_scan(catalog_db, settings, FakeEbay())
+    assert "junk" not in {d["listing_id"] for d in scanner.deals()}
 
 
 def test_parse_item_unknown_postage_assumed():

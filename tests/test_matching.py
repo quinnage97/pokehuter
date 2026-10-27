@@ -81,10 +81,26 @@ def test_condition(title, condition):
         "Pokemon Card Lot Charizard 4/102 bundle",
         "Choose your card Charizard",
         "Charizard 4/102 Gold Metal Card",
+        "Charizard SK 146/144 CREDIT CARD SKIN",
+        "Plastic Fan Art Pokemon TCG Shining Charizard 107/105 Neo Destiny Holo",
+        "POKELOTTERIA - CHARIZARD 146/144 Skyridge ITA - READ DESCRIPTION",
+        "Charizard 4/102 Base Set GER",
     ],
 )
 def test_rejections(title):
     assert rejection_reason(title)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Charizard 4/102 Base Set Holo Pack Fresh NM",
+        "Charizard 199/165 Special Illustration Rare 151 Near Mint",
+        "Charizard ex 223/197 Obsidian Flames SIR in toploader",
+    ],
+)
+def test_real_listings_not_rejected(title):
+    assert rejection_reason(title) is None
 
 
 def test_tag_team_is_not_mistaken_for_graded():
