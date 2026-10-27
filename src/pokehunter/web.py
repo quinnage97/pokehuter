@@ -74,6 +74,9 @@ class Engine:
             self.busy = None
 
     async def loop(self) -> None:
+        # Apply any pricing-rule changes from an update straight away.
+        with contextlib.suppress(Exception):
+            reprice(self.db)
         while True:
             if self.catalog_stale():
                 await self.refresh_catalog()

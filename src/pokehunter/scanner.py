@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import statistics
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -27,12 +28,18 @@ class Verdict:
 def evaluate(
     listing: Listing, condition: str, item: dict[str, Any], prefs: dict[str, Any]
 ) -> Verdict:
-    market = item.get("market_gbp")
+    """Is this listing a deal? Prices are compared with the *lower* of the price guide and
+    what other eBay sellers are asking for the same card, so a bad guide price can't
+    create a fake bargain."""
+    guide = item.get("market_gbp")
+    ebay_typical = item.get("ebay_median_gbp")
     target = item.get("target_price")
-    fair = round(market * CONDITION_FACTOR[condition], 2) if market else None
+    candidates = [p for p in (guide, ebay_typical) if p]
+    base = min(candidates) if candidates else None
+    fair = round(base * CONDITION_FACTOR[condition], 2) if base else None
     discount = round((fair - listing.total) / fair * 100, 1) if fair else None
 
-    value = market or target or 0
+    value = base or target or 0
     if condition == "DMG":
         condition_ok = prefs["allow_damaged"]
     elif condition in ("MP", "HP"):
@@ -51,19 +58,41 @@ def evaluate(
         and fair - listing.total >= prefs["min_saving_gbp"]
     )
     by_target = target is not None and listing.total <= target
-    too_good = discount is not None and discount > prefs["max_discount_pct"]
+    # Fakes are priced far below every genuine copy. Without other eBay listings to compare
+    # with, be stricter still.
+    limit = prefs["suspicious_above_pct"] if ebay_typical else prefs["suspicious_above_pct"] * 0.7
+    suspicious = discount is not None and discount > limit
 
     warnings = []
-    if discount is not None and discount >= 60:
-        warnings.append("Much cheaper than usual: check the photos and seller carefully")
+    if not ebay_typical:
+        warnings.append("Not enough other eBay listings to double-check the price")
     if not listing.shipping_known:
         warnings.append("Postage not listed (assumed £2)")
     return Verdict(
-        is_deal=bool(condition_ok and seller_ok and not too_good and (by_market or by_target)),
+        is_deal=bool(condition_ok and seller_ok and not suspicious and (by_market or by_target)),
         fair=fair,
         discount=discount,
         warning="; ".join(warnings) or None,
     )
+
+
+def ebay_medians(db: Database, min_comps: int = 4) -> dict[str, tuple[float, int]]:
+    """Typical asking price (median, delivered) of each card version on eBay this week,
+    from unplayed / unstated-condition copies."""
+    cutoff = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    rows = db.query(
+        "SELECT match_item_id, total FROM listings WHERE last_seen >= ? AND dismissed = 0"
+        " AND condition IN ('NM', 'LP', '?')",
+        (cutoff,),
+    )
+    grouped: dict[str, list[float]] = {}
+    for row in rows:
+        grouped.setdefault(row["match_item_id"], []).append(row["total"])
+    return {
+        item: (round(statistics.median(totals), 2), len(totals))
+        for item, totals in grouped.items()
+        if len(totals) >= min_comps
+    }
 
 
 def search_query(card: dict[str, Any]) -> str:
@@ -97,40 +126,26 @@ class Scanner:
         )
         return rows
 
-    async def scan(self) -> dict[str, Any]:
-        prefs = self.db.prefs()
-        started = now_iso()
-        with self.db.tx() as c:
-            run_id = c.execute(
-                "INSERT INTO runs(kind, started_at) VALUES('scan', ?)", (started,)
-            ).lastrowid
-        cards = load_card_refs(self.db)
-        items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
-        errors: list[str] = []
-        calls = 0
-        found: dict[str, Listing] = {}
-
-        queries: list[tuple[str, str | None, int, str | None]] = [
-            (name, "newlyListed", 200, None) for name in self.settings.pokemon_names
-        ]
-        for card in self.pick_targets(int(prefs["targeted_per_scan"])):
-            queries.append((search_query(card), "price", 100, card["id"]))
-
+    async def _run(self, queries, found, errors, stats) -> None:
         for query, sort, limit, card_id in queries:
+            if stats.get("stop"):
+                return
             try:
                 results = await self.ebay.search(query, sort=sort, limit=limit)
             except BudgetExhausted as exc:
                 errors.append(str(exc))
-                break
+                stats["stop"] = True
+                return
             except EbayError as exc:
                 errors.append(str(exc))
-                if calls == 0:
-                    break  # the very first call failed: credentials/network, not one query
+                if stats["calls"] == 0:
+                    stats["stop"] = True  # first call failed: credentials/network
+                    return
                 continue
             except Exception as exc:  # noqa: BLE001 - network blips must not kill the loop
                 errors.append(f"{query}: {type(exc).__name__}")
                 continue
-            calls += 1
+            stats["calls"] += 1
             for listing in results:
                 found[listing.item_id] = listing
             if card_id:
@@ -139,39 +154,85 @@ class Scanner:
                         "UPDATE items SET last_searched_at=? WHERE card_id=?", (now_iso(), card_id)
                     )
 
-        new_deals: list[dict[str, Any]] = []
-        timestamp = now_iso()
+    async def scan(self) -> dict[str, Any]:
+        prefs = self.db.prefs()
+        with self.db.tx() as c:
+            run_id = c.execute(
+                "INSERT INTO runs(kind, started_at) VALUES('scan', ?)", (now_iso(),)
+            ).lastrowid
+        cards = load_card_refs(self.db)
+        cards_by_id = {card.id: card for card in cards}
+        items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
+        errors: list[str] = []
+        stats: dict[str, Any] = {"calls": 0}
+        found: dict[str, Listing] = {}
+
+        # 1. Newly listed cards.
+        sweeps = [(name, "newlyListed", 200, None) for name in self.settings.pokemon_names]
+        await self._run(sweeps, found, errors, stats)
+
+        # 2. Card-by-card searches. Cards with a possible deal go first, so the price can be
+        #    checked against everything else listed for that card before anyone is alerted.
+        verify: list[str] = []
         for listing in found.values():
             match, _ = match_title(listing.title, cards)
-            if not match:
+            if not match or match.card.id in verify:
                 continue
-            item_id = f"{match.card.id}:{match.variant}"
-            item = items.get(item_id)
-            if not item:
+            item = items.get(f"{match.card.id}:{match.variant}")
+            if not item or item["owned"] or item["hidden"]:
                 continue
-            verdict = evaluate(listing, match.condition, item, prefs)
-            warning = "; ".join(w for w in (match.note, verdict.warning) if w) or None
-            with self.db.tx() as c:
-                previous = c.execute(
-                    "SELECT alert_status, dismissed FROM listings WHERE item_id=?",
-                    (listing.item_id,),
-                ).fetchone()
+            unchecked = {**prefs, "suspicious_above_pct": 1000}
+            if evaluate(listing, match.condition, item, unchecked).is_deal:
+                verify.append(match.card.id)
+        verify = verify[:10]
+        budget = int(prefs["targeted_per_scan"]) + len(verify)
+        targets: list[dict[str, Any]] = [
+            {
+                "id": cid,
+                "pokemon": cards_by_id[cid].pokemon,
+                "local_id": cards_by_id[cid].local_id,
+                "set_name": cards_by_id[cid].set_name,
+                "set_official": cards_by_id[cid].set_official,
+            }
+            for cid in verify
+        ]
+        for card in self.pick_targets(budget):
+            if len(targets) >= budget:
+                break
+            if card["id"] not in verify:
+                targets.append(card)
+        await self._run(
+            [(search_query(card), "price", 100, card["id"]) for card in targets],
+            found,
+            errors,
+            stats,
+        )
+
+        # 3. Store every recognised listing, then work out typical eBay prices.
+        timestamp = now_iso()
+        seen_now: set[str] = set()
+        with self.db.tx() as c:
+            for listing in found.values():
+                match, _ = match_title(listing.title, cards)
+                if not match:
+                    continue
+                item_id = f"{match.card.id}:{match.variant}"
+                if item_id not in items:
+                    continue
+                seen_now.add(listing.item_id)
                 c.execute(
                     """
                     INSERT INTO listings (item_id, title, url, image, price, shipping,
                         shipping_known, total, condition, seller, feedback_score, feedback_pct,
-                        listed_at, first_seen, last_seen, match_item_id, market_gbp, fair_gbp,
-                        discount_pct, is_deal, warning)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        listed_at, first_seen, last_seen, match_item_id, warning)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(item_id) DO UPDATE SET
                         title=excluded.title, url=excluded.url, image=excluded.image,
                         price=excluded.price, shipping=excluded.shipping,
                         shipping_known=excluded.shipping_known, total=excluded.total,
                         condition=excluded.condition, feedback_score=excluded.feedback_score,
                         feedback_pct=excluded.feedback_pct, last_seen=excluded.last_seen,
-                        match_item_id=excluded.match_item_id, market_gbp=excluded.market_gbp,
-                        fair_gbp=excluded.fair_gbp, discount_pct=excluded.discount_pct,
-                        is_deal=excluded.is_deal, warning=excluded.warning
+                        match_item_id=excluded.match_item_id, warning=excluded.warning
                     """,
                     (
                         listing.item_id,
@@ -190,25 +251,20 @@ class Scanner:
                         timestamp,
                         timestamp,
                         item_id,
-                        item.get("market_gbp"),
-                        verdict.fair,
-                        verdict.discount,
-                        int(verdict.is_deal),
-                        warning,
+                        match.note or None,
                     ),
                 )
-            wanted = not item["owned"] and not item["hidden"]
-            fresh = previous is None or not (previous["alert_status"] or previous["dismissed"])
-            if verdict.is_deal and wanted and fresh:
-                new_deals.append(
-                    {
-                        "item_id": listing.item_id,
-                        "priority": item["priority"],
-                        "discount": verdict.discount or 0,
-                    }
-                )
+        medians = ebay_medians(self.db)
+        with self.db.tx() as c:
+            c.execute("UPDATE items SET ebay_median_gbp = NULL, ebay_comps = NULL")
+            c.executemany(
+                "UPDATE items SET ebay_median_gbp = ?, ebay_comps = ? WHERE id = ?",
+                [(median, count, item_id) for item_id, (median, count) in medians.items()],
+            )
+        items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
 
-        self.revalidate(cards, prefs)
+        # 4. Judge every recent listing with today's prices and rules.
+        new_deals = self.reevaluate(cards, items, prefs, seen_now)
         alerts = await self._send_alerts(new_deals, prefs, errors)
         deal_count = len(self.deals())
         with self.db.tx() as c:
@@ -217,7 +273,7 @@ class Scanner:
                 " error=? WHERE id=?",
                 (
                     now_iso(),
-                    calls,
+                    stats["calls"],
                     len(found),
                     deal_count,
                     alerts,
@@ -227,34 +283,80 @@ class Scanner:
             )
         log.info(
             "scan done: %d calls, %d listings, %d deals, %d alerts, %d errors",
-            calls,
+            stats["calls"],
             len(found),
             deal_count,
             alerts,
             len(errors),
         )
         return {
-            "calls": calls,
+            "calls": stats["calls"],
             "listings": len(found),
             "deals": deal_count,
             "alerts": alerts,
             "errors": errors,
         }
 
-    def revalidate(self, cards: list, prefs: dict[str, Any]) -> None:
-        """Drop stored deals that today's filters would reject (e.g. after a rule update)."""
-        rows = self.db.query("SELECT item_id, title, discount_pct FROM listings WHERE is_deal = 1")
-        stale = [
-            row["item_id"]
-            for row in rows
-            if match_title(row["title"], cards)[0] is None
-            or (row["discount_pct"] or 0) > prefs["max_discount_pct"]
-        ]
-        if stale:
-            with self.db.tx() as c:
-                c.executemany(
-                    "UPDATE listings SET is_deal = 0 WHERE item_id = ?", [(i,) for i in stale]
+    def reevaluate(
+        self,
+        cards: list,
+        items: dict[str, dict[str, Any]],
+        prefs: dict[str, Any],
+        seen_now: set[str],
+    ) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(UTC) - timedelta(hours=DEAL_WINDOW_HOURS)).isoformat()
+        rows = self.db.query("SELECT * FROM listings WHERE last_seen >= ?", (cutoff,))
+        updates, new_deals = [], []
+        for row in rows:
+            item = items.get(row["match_item_id"])
+            if not item:
+                continue
+            listing = Listing(
+                item_id=row["item_id"],
+                title=row["title"],
+                url=row["url"],
+                image=row["image"],
+                price=row["price"],
+                shipping=row["shipping"],
+                shipping_known=bool(row["shipping_known"]),
+                seller=row["seller"],
+                feedback_score=row["feedback_score"],
+                feedback_pct=row["feedback_pct"],
+                listed_at=row["listed_at"],
+            )
+            match, _ = match_title(row["title"], cards)
+            verdict = evaluate(listing, row["condition"], item, prefs)
+            is_deal = bool(match) and verdict.is_deal
+            notes = [match.note] if match and match.note else []
+            if verdict.warning:
+                notes.append(verdict.warning)
+            updates.append(
+                (
+                    item.get("market_gbp"),
+                    verdict.fair,
+                    verdict.discount,
+                    int(is_deal),
+                    "; ".join(notes) or None,
+                    row["item_id"],
                 )
+            )
+            wanted = not item["owned"] and not item["hidden"]
+            fresh = not row["alert_status"] and not row["dismissed"]
+            if is_deal and wanted and fresh and row["item_id"] in seen_now:
+                new_deals.append(
+                    {
+                        "item_id": row["item_id"],
+                        "priority": item["priority"],
+                        "discount": verdict.discount or 0,
+                    }
+                )
+        with self.db.tx() as c:
+            c.executemany(
+                "UPDATE listings SET market_gbp=?, fair_gbp=?, discount_pct=?, is_deal=?,"
+                " warning=? WHERE item_id=?",
+                updates,
+            )
+        return new_deals
 
     async def _send_alerts(
         self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], errors: list[str]
@@ -290,6 +392,7 @@ class Scanner:
         return self.db.query(
             """
             SELECT l.item_id AS listing_id, l.*, i.variant, i.priority, i.target_price,
+                   i.ebay_median_gbp, i.ebay_comps,
                    c.name AS card_name, c.set_name, c.local_id, c.image AS card_image, c.pokemon
             FROM listings l
             JOIN items i ON i.id = l.match_item_id

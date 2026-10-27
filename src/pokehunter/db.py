@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS items (
     target_price REAL,
     market_gbp REAL,
     price_source TEXT,
-    last_searched_at TEXT
+    last_searched_at TEXT,
+    ebay_median_gbp REAL,
+    ebay_comps INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS listings (
@@ -91,14 +93,14 @@ DEFAULT_PREFS: dict[str, Any] = {
     "priority_discount_pct": 5,  # looser threshold for starred cards
     "min_saving_gbp": 2,
     # Far cheaper than this is almost never the real card (fakes, stickers, lucky dips).
-    "max_discount_pct": 75,
+    "suspicious_above_pct": 50,
     "played_ok_above_gbp": 15,  # MP/HP copies are only considered for cards worth this much
     "allow_damaged": False,
     "min_seller_feedback": 5,
     "alerts_enabled": True,
     "max_alerts_per_scan": 10,
     "targeted_per_scan": 30,
-    "price_source": "cardmarket",  # or "tcgplayer"
+    "price_source": "lowest",  # or "cardmarket" / "tcgplayer"
 }
 
 
@@ -116,6 +118,10 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(items)")}
+        for name, kind in (("ebay_median_gbp", "REAL"), ("ebay_comps", "INTEGER")):
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE items ADD COLUMN {name} {kind}")
         self._conn.commit()
 
     @contextmanager
@@ -166,7 +172,7 @@ class Database:
                 current[key] = bool(value)
             elif isinstance(default, int):
                 current[key] = max(0, int(float(value)))
-            elif key == "price_source" and value in ("cardmarket", "tcgplayer"):
+            elif key == "price_source" and value in ("lowest", "cardmarket", "tcgplayer"):
                 current[key] = value
         self.set_kv("prefs", current)
         return current

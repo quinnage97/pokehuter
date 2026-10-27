@@ -85,6 +85,7 @@ def test_condition(title, condition):
         "Plastic Fan Art Pokemon TCG Shining Charizard 107/105 Neo Destiny Holo",
         "POKELOTTERIA - CHARIZARD 146/144 Skyridge ITA - READ DESCRIPTION",
         "Charizard 4/102 Base Set GER",
+        "Pokemon 150/147 Charizard GX sp250 tarjeta carta Pokemon.España",
     ],
 )
 def test_rejections(title):

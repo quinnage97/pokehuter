@@ -23,10 +23,11 @@ VARIANT_ORDER = ["firstEdition", "holo", "normal", "reverse"]
 EXCLUDED_SERIES = {"tcgp"}  # Pokémon TCG Pocket is a phone game, not physical cards
 
 # Which price fields describe which variant.
+# The lowest of these is used, so one odd sale can't inflate the price.
 CARDMARKET_KEYS = {
-    "normal": ("trend", "avg30", "avg"),
-    "holo": ("trend", "avg30", "avg"),
-    "reverse": ("trend-holo", "avg30-holo", "avg-holo"),
+    "normal": ("trend", "avg7", "avg30"),
+    "holo": ("trend", "avg7", "avg30"),
+    "reverse": ("trend-holo", "avg7-holo", "avg30-holo"),
     "firstEdition": (),  # Cardmarket lists 1st Edition as a separate product
 }
 TCGPLAYER_KEYS = {
@@ -62,16 +63,28 @@ def _first_number(source: dict[str, Any] | None, keys: tuple[str, ...]) -> float
     return None
 
 
+def _lowest_number(source: dict[str, Any] | None, keys: tuple[str, ...]) -> float | None:
+    values = [(source or {}).get(key) for key in keys]
+    numbers = [float(v) for v in values if isinstance(v, int | float) and v > 0]
+    return min(numbers) if numbers else None
+
+
 def variant_price_gbp(
     pricing: dict[str, Any] | None, variant: str, fx: dict[str, float], source: str
 ) -> tuple[float | None, str | None]:
     pricing = pricing or {}
-    cm = _first_number(pricing.get("cardmarket"), CARDMARKET_KEYS[variant])
+    cm = _lowest_number(pricing.get("cardmarket"), CARDMARKET_KEYS[variant])
     tp = _first_number(pricing.get("tcgplayer"), TCGPLAYER_KEYS[variant])
     options = {
         "cardmarket": cm * fx["EUR"] if cm else None,
         "tcgplayer": tp * fx["USD"] if tp else None,
     }
+    if source == "lowest":
+        priced = [(value, name) for name, value in options.items() if value]
+        if priced:
+            value, name = min(priced)
+            return round(value, 2), name
+        return None, None
     order = [source] + [s for s in options if s != source]
     for name in order:
         if options[name]:

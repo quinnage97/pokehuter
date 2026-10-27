@@ -10,10 +10,12 @@ from pokehunter.ebay import EbayClient, parse_item
 from pokehunter.scanner import Scanner, evaluate, search_query
 
 LISTINGS = [
-    # Base Charizard, LP: fair = 320 * 0.85 = 272. £150 delivered is a big deal.
+    # Base Charizard, LP: fair = 304 * 0.85 = 258.40. £150 delivered is 42% under.
     ebay_item("1", "Charizard 4/102 Base Set Holo LP", "149.00"),
-    # Fair price, not a deal.
+    # Fairly priced copies, which also confirm the guide price is realistic on eBay.
     ebay_item("2", "Charizard 4/102 Base Set Holo NM", "330.00"),
+    ebay_item("6", "Charizard 4/102 Base Set Unlimited Holo Rare", "299.00"),
+    ebay_item("7", "Pokemon Charizard 4/102 Holo Base", "309.00"),
     # Mewtwo, ignored.
     ebay_item("3", "Mewtwo 114/264 Fusion Strike", "0.50"),
     # Multi-variation listing, ignored.
@@ -58,7 +60,8 @@ def test_scan_finds_deal_and_alerts_once(catalog_db, settings):
     assert result["errors"] == []
     deals = scanner.deals()
     assert [d["listing_id"] for d in deals] == ["1"]
-    assert deals[0]["fair_gbp"] == 272.0 and deals[0]["total"] == 150.0
+    assert deals[0]["fair_gbp"] == 258.4 and deals[0]["total"] == 150.0
+    assert deals[0]["ebay_median_gbp"] == 305.0 and deals[0]["ebay_comps"] == 4
     assert len(fake.messages) == 1 and "Charizard" in fake.messages[0]
     # Sweep queries per Pokémon plus targeted card searches.
     assert fake.searches[:2] == ["Charizard", "Mew"]
@@ -94,7 +97,7 @@ def test_target_price_triggers_deal(catalog_db, settings):
     with catalog_db.tx() as c:
         c.execute("UPDATE items SET target_price=340 WHERE id='base1-4:holo'")
     _, scanner = run_scan(catalog_db, settings, FakeEbay())
-    assert {d["listing_id"] for d in scanner.deals()} == {"1", "2"}
+    assert {d["listing_id"] for d in scanner.deals()} == {"1", "2", "6", "7"}
 
 
 def test_alerts_respect_settings(catalog_db, settings):
@@ -112,7 +115,7 @@ def test_evaluate_rules():
         "played_ok_above_gbp": 15,
         "allow_damaged": False,
         "min_seller_feedback": 5,
-        "max_discount_pct": 75,
+        "suspicious_above_pct": 50,
     }
     item = {"market_gbp": 100.0, "target_price": None, "priority": 0}
     listing = parse_item(ebay_item("x", "t", "79.00", shipping="0"), "GBP")
@@ -123,9 +126,42 @@ def test_evaluate_rules():
     low_feedback = parse_item(
         ebay_item("y", "t", "10.00", seller={"username": "new", "feedbackScore": 0}), "GBP"
     )
-    assert not evaluate(low_feedback, "NM", {**item, "market_gbp": 12.0}, prefs).is_deal
+    assert not evaluate(low_feedback, "NM", {**item, "market_gbp": 13.0}, prefs).is_deal
     too_cheap = parse_item(ebay_item("z", "t", "10.00", shipping="0"), "GBP")
     assert not evaluate(too_cheap, "NM", item, prefs).is_deal  # 90% under: not a real card
+
+
+def test_ebay_prices_override_a_bad_price_guide():
+    """Mew VMAX 269/264: the guide said £173 but copies sell on eBay for about £18."""
+    prefs = {
+        "min_discount_pct": 20,
+        "priority_discount_pct": 5,
+        "min_saving_gbp": 2,
+        "played_ok_above_gbp": 15,
+        "allow_damaged": False,
+        "min_seller_feedback": 5,
+        "suspicious_above_pct": 50,
+    }
+    item = {"market_gbp": 173.4, "ebay_median_gbp": 18.0, "target_price": None, "priority": 0}
+    listing = parse_item(ebay_item("m", "t", "45.00", shipping="0"), "GBP")
+    verdict = evaluate(listing, "NM", item, prefs)
+    assert not verdict.is_deal and verdict.fair == 18.0
+
+
+def test_fakes_far_below_ebay_prices_are_ignored():
+    prefs = {
+        "min_discount_pct": 20,
+        "priority_discount_pct": 5,
+        "min_saving_gbp": 2,
+        "played_ok_above_gbp": 15,
+        "allow_damaged": False,
+        "min_seller_feedback": 5,
+        "suspicious_above_pct": 50,
+    }
+    # Delta Charizard: genuine copies around £400 on eBay, a "deal" at £100 is a fake.
+    item = {"market_gbp": 488.0, "ebay_median_gbp": 420.0, "target_price": None, "priority": 0}
+    listing = parse_item(ebay_item("d", "t", "100.19", shipping="0"), "GBP")
+    assert not evaluate(listing, "?", item, prefs).is_deal
 
 
 def test_old_junk_deals_are_cleared(catalog_db, settings):
@@ -169,3 +205,25 @@ def test_search_query():
         )
         == "Charizard SWSH050"
     )
+
+
+def test_alert_text_without_price_guide():
+    from pokehunter.alerts import format_deal
+
+    deal = {
+        "card_name": "Mew",
+        "set_name": "Promo",
+        "local_id": "8",
+        "variant": "holo",
+        "total": 9.5,
+        "fair_gbp": None,
+        "discount_pct": None,
+        "target_price": 10.0,
+        "market_gbp": None,
+        "ebay_median_gbp": None,
+        "condition": "NM",
+        "title": "Ancient Mew promo",
+        "url": "https://www.ebay.co.uk/itm/1",
+    }
+    text = format_deal(deal, None)
+    assert "£10.00 alert price" in text and "not enough listings" in text

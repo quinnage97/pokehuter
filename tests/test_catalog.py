@@ -8,8 +8,9 @@ def test_catalog_builds_variant_checklist(catalog_db):
     # Pocket (phone game) cards and Mewtwo are left out.
     assert not any(i.startswith("A1-") or "mewtwo" in i for i in items)
     assert set(items) >= {"base1-4:firstEdition", "base1-4:holo", "swsh4-25:reverse"}
-    # Cardmarket EUR converted at €1 = £0.80.
-    assert items["base1-4:holo"]["market_gbp"] == 320.0
+    # Lowest price wins: Cardmarket avg30 €380 at €1 = £0.80, below TCGplayer's $520.
+    assert items["base1-4:holo"]["market_gbp"] == 304.0
+    assert items["base1-4:holo"]["price_source"] == "cardmarket"
     assert items["swsh4-25:reverse"]["market_gbp"] == 2.4
     # 1st Edition only has a TCGplayer price ($9000 at $1 = £0.80).
     assert items["base1-4:firstEdition"]["market_gbp"] == 7200.0
@@ -27,7 +28,7 @@ def test_reprice_switches_source(catalog_db):
 
 def test_card_refs(catalog_db):
     refs = {r.id: r for r in load_card_refs(catalog_db)}
-    assert refs["base1-4"].variants == {"firstEdition": 7200.0, "holo": 320.0}
+    assert refs["base1-4"].variants == {"firstEdition": 7200.0, "holo": 304.0}
 
 
 def test_variants_fallback():

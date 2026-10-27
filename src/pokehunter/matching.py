@@ -57,7 +57,8 @@ _EXCLUDED = re.compile(
 _NON_ENGLISH = re.compile(
     r"\b(japanese|japan|jpn|jp|korean|kor|chinese|s-chinese|t-chinese|german|deutsch|french"
     r"|fran[cç]ais|italian|italiano|spanish|espa[nñ]ol|portuguese|dutch|thai|indonesian"
-    r"|ita|ger|deu|fra|fr|esp|spa|por|kr|cn|chn|jap|sc|tc)\b",
+    r"|ita|ger|deu|fra|fr|esp|spa|por|kr|cn|chn|jap|sc|tc|tarjetas?|cartas?|carte|karten?"
+    r"|espa[nñ]a|versione|vf)\b",
     re.I,
 )
 _FIRST_ED = re.compile(r"\b(1st|first)[\s-]*ed(ition|\.)?\b", re.I)

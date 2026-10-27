@@ -110,7 +110,8 @@ function dealCard(d) {
         <div class="meta">${esc(d.set_name)} #${esc(d.local_id)} · ${VARIANT[d.variant] || esc(d.variant)}</div>
         <div><span class="badge">${esc(COND[d.condition] || d.condition)}</span>${off}${target}</div>
         <div class="price">${gbp(d.total)}</div>
-        <div class="vs">delivered · fair ${gbp(d.fair_gbp)} · NM market ${gbp(d.market_gbp)}</div>
+        <div class="vs">delivered · fair ${gbp(d.fair_gbp)}</div>
+        <div class="meta">Price guide ${gbp(d.market_gbp)} · eBay typical ${d.ebay_median_gbp ? `${gbp(d.ebay_median_gbp)} (${d.ebay_comps} listed)` : "not enough listings"}</div>
         <div class="meta">Seller ${esc(d.seller || "?")} (${d.feedback_score ?? "?"}) · seen ${ago(d.last_seen)}</div>
       </div>
     </div>

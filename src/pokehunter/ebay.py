@@ -13,6 +13,7 @@ from .config import Settings
 from .db import Database
 
 API = "https://api.ebay.com"
+BLOCKED_LOCATIONS = {"CN", "HK"}
 
 
 class EbayError(RuntimeError):
@@ -145,6 +146,9 @@ def parse_item(item: dict[str, Any], currency: str) -> Listing | None:
     if item.get("itemGroupType"):
         return None
     if "FIXED_PRICE" not in (item.get("buyingOptions") or []):
+        return None
+    # Counterfeits overwhelmingly ship from these locations.
+    if (item.get("itemLocation") or {}).get("country") in BLOCKED_LOCATIONS:
         return None
 
     shipping_costs = []

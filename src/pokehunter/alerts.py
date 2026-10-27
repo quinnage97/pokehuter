@@ -16,15 +16,27 @@ class AlertError(RuntimeError):
 def format_deal(deal: dict[str, Any], public_url: str | None) -> str:
     star = "⭐ PRIORITY CARD\n" if deal.get("priority") else ""
     variant = VARIANT_LABEL.get(deal["variant"], deal["variant"])
+    price_line = f"<b>£{deal['total']:.2f}</b> delivered"
+    if deal.get("fair_gbp") and deal.get("discount_pct") is not None:
+        price_line += (
+            f" (fair price for this condition ≈ £{deal['fair_gbp']:.2f}, "
+            f"<b>{deal['discount_pct']:.0f}% under</b>)"
+        )
+    if deal.get("target_price") and deal["total"] <= deal["target_price"]:
+        price_line += f"\nAt or below your £{deal['target_price']:.2f} alert price"
+    guide = f"£{deal['market_gbp']:.2f}" if deal.get("market_gbp") else "none"
+    typical = (
+        f"£{deal['ebay_median_gbp']:.2f} ({deal['ebay_comps']} listed)"
+        if deal.get("ebay_median_gbp")
+        else "not enough listings"
+    )
     lines = [
         f"{star}🔥 <b>{html.escape(deal['card_name'])}</b> — {html.escape(deal['set_name'])} "
         f"#{html.escape(deal['local_id'])} ({variant})",
         "",
-        f"<b>£{deal['total']:.2f}</b> delivered "
-        f"(fair price for this condition ≈ £{deal['fair_gbp']:.2f}, "
-        f"<b>{deal['discount_pct']:.0f}% under</b>)",
-        f"Condition: {CONDITION_LABEL.get(deal['condition'], deal['condition'])}"
-        + (f" · NM market ≈ £{deal['market_gbp']:.2f}" if deal.get("market_gbp") else ""),
+        price_line,
+        f"Condition: {CONDITION_LABEL.get(deal['condition'], deal['condition'])}",
+        f"Price guide {guide} · eBay typical {typical}",
     ]
     if deal.get("feedback_score") is not None:
         rating = deal.get("feedback_pct") or "?"
