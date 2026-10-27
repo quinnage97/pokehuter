@@ -35,3 +35,35 @@ def test_variants_fallback():
     assert card_variants({}) == ["normal"]
     detailed = {"variants_detailed": [{"type": "holo"}, {"type": "holo", "stamp": ["1st-edition"]}]}
     assert card_variants(detailed) == ["firstEdition", "holo"]
+
+
+def test_stamped_printings_are_separate_checklist_entries():
+    card = {
+        "variants": {"holo": True, "reverse": True},
+        "variants_detailed": [
+            {"type": "holo"},
+            {"type": "reverse"},
+            {"type": "holo", "stamp": ["set-logo"], "pricing": {"cardmarket": {"trend": 20}}},
+            {"type": "holo", "stamp": ["staff", "set-logo"]},
+            {"type": "holo", "stamp": ["pokemon-center"], "size": "jumbo"},
+        ],
+        "pricing": {"cardmarket": {"trend": 5, "trend-holo": 6}},
+    }
+    from pokehunter.catalog import variant_price_gbp, variant_pricing
+    from pokehunter.matching import variant_label
+
+    assert card_variants(card) == ["holo", "reverse", "holo:set-logo", "holo:set-logo+staff"]
+    fx = {"EUR": 1.0, "USD": 1.0}
+    blob = variant_pricing(card)
+    assert variant_price_gbp(blob, "holo", fx, "lowest") == (5.0, "cardmarket")
+    assert variant_price_gbp(blob, "holo:set-logo", fx, "lowest") == (20.0, "cardmarket")
+    assert variant_price_gbp(blob, "holo:set-logo+staff", fx, "lowest") == (None, None)
+    assert variant_label("holo:set-logo+staff") == "Holo · set-logo stamp · staff stamp"
+
+
+def test_alt_image_guess():
+    from pokehunter.catalog import guess_alt_image
+
+    assert guess_alt_image("sv03.5", "199") == "https://images.pokemontcg.io/sv3pt5/199.png"
+    assert guess_alt_image("swsh4", "025") == "https://images.pokemontcg.io/swsh4/25.png"
+    assert guess_alt_image("swsh11tg", "TG03") == "https://images.pokemontcg.io/swsh11tg/TG03.png"

@@ -219,3 +219,24 @@ def match_title(title: str, cards: list[CardRef]) -> tuple[Match | None, str]:
         base = [v for v in card.variants if v in ("holo", "normal")] or list(card.variants)
         variant = card.cheapest(base)
     return Match(card=card, variant=variant, condition=detect_condition(title), note=note), "ok"
+
+
+STAMP_LABEL = {
+    "set-logo": "set-logo stamp",
+    "pre-release": "prerelease stamp",
+    "staff": "staff stamp",
+    "pokemon-center": "Pokémon Center stamp",
+    "player-rewards-program": "Play! Pokémon stamp",
+    "30th-anniversary": "30th Anniversary stamp",
+    "25th-celebration": "25th Celebration stamp",
+    "w-promo": "W stamp",
+}
+
+
+def variant_label(variant: str) -> str:
+    """'holo' -> 'Holo'; 'holo:set-logo' -> 'Holo · set-logo stamp'."""
+    base, _, stamps = variant.partition(":")
+    label = VARIANT_LABEL.get(base, base.title())
+    for stamp in filter(None, stamps.split("+")):
+        label += " · " + STAMP_LABEL.get(stamp, stamp.replace("-", " ").title() + " stamp")
+    return label

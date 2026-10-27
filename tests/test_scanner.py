@@ -259,3 +259,50 @@ def test_uk_only_filter_sent_to_ebay(catalog_db, settings):
     run_scan(catalog_db, settings, spy)
     searches = [u for u in urls if "item_summary" in u]
     assert searches and all("itemLocationCountry%3AGB" in u for u in searches)
+
+
+class StubPhotos:
+    """Pretends to be Claude: says the Base Set LP copy is a fake."""
+
+    ready = True
+
+    def __init__(self, verdict="fake"):
+        self.verdict = verdict
+        self.calls = []
+
+    async def check(self, claimed, title, image_urls):
+        from pokehunter.photocheck import PhotoVerdict
+
+        self.calls.append((claimed, title, image_urls))
+        return PhotoVerdict(self.verdict, "Whole card is gold metal")
+
+
+def run_scan_with_photos(db, settings, fake, photos):
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(fake)) as http:
+            scanner = Scanner(
+                db, settings, EbayClient(settings, http, db), Telegram(settings, http), photos
+            )
+            return await scanner.scan(), scanner
+
+    return asyncio.run(go())
+
+
+def test_photo_check_blocks_fakes(catalog_db, settings):
+    fake = FakeEbay()
+    photos = StubPhotos("fake")
+    _, scanner = run_scan_with_photos(catalog_db, settings, fake, photos)
+    assert scanner.deals() == [] and fake.messages == []
+    claimed, title, urls = photos.calls[0]
+    assert claimed == "Charizard from Base Set, number 4/102, Holo"
+    assert urls == ["https://i.ebayimg.com/1.jpg"]
+    # Checked once only, and stays rejected on later scans.
+    run_scan_with_photos(catalog_db, settings, fake, photos)
+    assert len(photos.calls) == 1 and scanner.deals() == []
+
+
+def test_photo_check_genuine_alerts_with_note(catalog_db, settings):
+    fake = FakeEbay()
+    _, scanner = run_scan_with_photos(catalog_db, settings, fake, StubPhotos("genuine"))
+    assert [d["listing_id"] for d in scanner.deals()] == ["1"]
+    assert "Photo check: looks genuine" in fake.messages[0]

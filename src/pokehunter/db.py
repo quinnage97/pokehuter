@@ -38,9 +38,7 @@ CREATE TABLE IF NOT EXISTS items (
     target_price REAL,
     market_gbp REAL,
     price_source TEXT,
-    last_searched_at TEXT,
-    ebay_median_gbp REAL,
-    ebay_comps INTEGER
+    last_searched_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS listings (
@@ -87,6 +85,17 @@ CREATE TABLE IF NOT EXISTS api_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
+# Columns added after the first release, applied to existing databases on start-up.
+MIGRATIONS = [
+    ("items", "ebay_median_gbp", "REAL"),
+    ("items", "ebay_comps", "INTEGER"),
+    ("cards", "image_alt", "TEXT"),
+    ("cards", "custom", "INTEGER NOT NULL DEFAULT 0"),
+    ("listings", "images_json", "TEXT"),
+    ("listings", "photo_verdict", "TEXT"),
+    ("listings", "photo_reason", "TEXT"),
+]
+
 # Defaults for the options shown on the website's Settings tab.
 DEFAULT_PREFS: dict[str, Any] = {
     "min_discount_pct": 20,  # alert when this far below the condition-adjusted price
@@ -100,6 +109,7 @@ DEFAULT_PREFS: dict[str, Any] = {
     "trusted_seller_above_gbp": 30,  # cards worth this much...
     "trusted_seller_feedback": 50,  # ...need a seller with at least this much feedback
     "uk_sellers_only": True,
+    "photo_check_enabled": True,
     "alerts_enabled": True,
     "max_alerts_per_scan": 10,
     "targeted_per_scan": 30,
@@ -121,10 +131,10 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
-        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(items)")}
-        for name, kind in (("ebay_median_gbp", "REAL"), ("ebay_comps", "INTEGER")):
+        for table, name, kind in MIGRATIONS:
+            columns = {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")}
             if name not in columns:
-                self._conn.execute(f"ALTER TABLE items ADD COLUMN {name} {kind}")
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         self._conn.commit()
 
     @contextmanager

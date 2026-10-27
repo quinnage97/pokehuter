@@ -2,86 +2,212 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16131f">
   <title>PokéHunter</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <div class="brand">🔥 PokéHunter <span class="sub">Charizard &amp; Mew deal catcher</span></div>
-    <div id="status" class="status">Loading…</div>
-    <nav>
-      <button data-tab="deals" class="active">Deals <span id="deal-count" class="pill"></span></button>
-      <button data-tab="checklist">Checklist</button>
-      <button data-tab="settings">Settings</button>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">🔥</span>
+      <div>
+        <div class="title">PokéHunter</div>
+        <div id="status" class="status">Loading…</div>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="deals" class="active"><span class="ico">🔥</span><span>Deals</span><span id="deal-count" class="pill"></span></button>
+      <button data-tab="checklist"><span class="ico">📚</span><span>Collection</span></button>
+      <button data-tab="settings"><span class="ico">⚙️</span><span>Settings</span></button>
     </nav>
   </header>
 
   <main>
+    <!-- DEALS -->
     <section id="tab-deals">
       <div id="setup-warning" class="notice" hidden></div>
+
       <div id="watch-wrap" hidden>
-        <h2>⭐ Priority watch</h2>
-        <p class="hint">Cheapest copy we've seen for each starred card, even if it isn't a deal yet.</p>
+        <div class="section-head"><h2>⭐ Priority watch</h2><span class="hint">Cheapest copy of each starred card</span></div>
         <div id="watch" class="watch"></div>
       </div>
-      <h2>Deals</h2>
+
+      <div class="section-head">
+        <div class="seg" id="scope">
+          <button data-scope="deals" class="on">Deals</button>
+          <button data-scope="all">All listings</button>
+        </div>
+        <button id="filter-toggle" class="btn ghost">Filters <span id="filter-count" class="pill"></span></button>
+      </div>
+
+      <div id="filters" class="filters panel">
+        <div class="frow">
+          <input id="f-search" type="search" placeholder="Search card, set or title…" autocomplete="off">
+          <select id="f-sort" aria-label="Sort">
+            <option value="best">Best deal first</option>
+            <option value="saving">Biggest saving (£)</option>
+            <option value="cheap">Cheapest first</option>
+            <option value="dear">Most valuable first</option>
+            <option value="new">Newest listings</option>
+            <option value="old">Oldest sets first</option>
+          </select>
+        </div>
+        <div class="frow">
+          <span class="flabel">Pokémon</span>
+          <div class="chips" id="f-poke"></div>
+        </div>
+        <div class="frow">
+          <span class="flabel">Condition</span>
+          <div class="chips multi" id="f-cond">
+            <button data-v="NM">NM</button><button data-v="LP">LP</button><button data-v="MP">MP</button>
+            <button data-v="HP">HP</button><button data-v="DMG">Damaged</button><button data-v="?">Not stated</button>
+          </div>
+        </div>
+        <div class="frow">
+          <span class="flabel">Version</span>
+          <div class="chips multi" id="f-var">
+            <button data-v="firstEdition">1st Edition</button><button data-v="holo">Holo</button>
+            <button data-v="reverse">Reverse</button><button data-v="normal">Normal</button><button data-v="stamped">Stamped</button>
+          </div>
+        </div>
+        <div class="frow grid2">
+          <label>Max price £<input id="f-max" type="number" min="0" inputmode="decimal" placeholder="any"></label>
+          <label>Min price £<input id="f-min" type="number" min="0" inputmode="decimal" placeholder="0"></label>
+          <label>At least <input id="f-disc" type="number" min="0" max="100" inputmode="numeric" placeholder="0">% under</label>
+          <label>Seller feedback ≥ <input id="f-fb" type="number" min="0" inputmode="numeric" placeholder="0"></label>
+        </div>
+        <div class="frow toggles">
+          <label class="tog"><input type="checkbox" id="f-star"> ⭐ Starred only</label>
+          <label class="tog"><input type="checkbox" id="f-photo"> 📷 Photo-checked only</label>
+          <label class="tog"><input type="checkbox" id="f-verified"> Compared with eBay only</label>
+          <label class="tog"><input type="checkbox" id="f-post"> Postage known</label>
+          <button id="f-reset" class="btn ghost small">Reset filters</button>
+        </div>
+      </div>
+
+      <div id="result-line" class="hint result-line"></div>
       <div id="deals" class="deals"></div>
     </section>
 
+    <!-- COLLECTION -->
     <section id="tab-checklist" hidden>
       <div id="progress" class="progress-wrap"></div>
-      <div class="filters">
-        <div class="seg" id="poke-filter"></div>
-        <input id="search" type="search" placeholder="Search name or set…">
-        <label><input type="checkbox" id="hide-owned" checked> Hide cards we have</label>
-        <label><input type="checkbox" id="only-priority"> Only starred</label>
-        <label><input type="checkbox" id="show-hidden"> Show skipped</label>
+      <div class="filters panel open">
+        <div class="frow">
+          <input id="c-search" type="search" placeholder="Search name, set or number…" autocomplete="off">
+          <select id="c-era" aria-label="Era"><option value="">All eras</option></select>
+        </div>
+        <div class="frow">
+          <div class="chips" id="c-poke"></div>
+          <div class="chips" id="c-status">
+            <button data-v="need" class="on">Need</button><button data-v="have">Have</button><button data-v="all">All</button>
+          </div>
+        </div>
+        <div class="frow toggles">
+          <label class="tog"><input type="checkbox" id="c-star"> ⭐ Starred only</label>
+          <label class="tog"><input type="checkbox" id="c-stamped" checked> Include stamped promos</label>
+          <label class="tog"><input type="checkbox" id="c-hidden"> Show skipped</label>
+          <button id="add-card" class="btn ghost small">＋ Add a missing card</button>
+        </div>
       </div>
-      <p class="hint">Tick the versions you already own. ⭐ a card to search for it every scan and
-        alert on smaller discounts. Set an "alert at £" price to get a ping whenever one is listed at or below it.</p>
+      <p class="hint">Tick the versions you own. ⭐ = search every scan and alert at a smaller discount.
+        "Alert at £" pings you whenever a copy is listed at or below that price.</p>
       <div id="checklist"></div>
     </section>
 
+    <!-- SETTINGS -->
     <section id="tab-settings" hidden>
-      <h2>Deal rules</h2>
-      <form id="prefs" class="prefs">
-        <label>Alert when at least <input name="min_discount_pct" type="number" min="0" max="90">% under fair price</label>
-        <label>…or for ⭐ starred cards, <input name="priority_discount_pct" type="number" min="0" max="90">% under</label>
-        <label>Minimum saving £<input name="min_saving_gbp" type="number" min="0"></label>
-        <label>Ignore anything more than <input name="suspicious_above_pct" type="number" min="0" max="100">% under (almost always fake or not a real card)</label>
-        <label>Accept MP/HP (played) copies for cards worth over £<input name="played_ok_above_gbp" type="number" min="0"></label>
-        <label><input name="allow_damaged" type="checkbox"> Accept damaged copies</label>
-        <label>Ignore sellers with fewer than <input name="min_seller_feedback" type="number" min="0"> feedback</label>
-        <label>…and for cards worth over £<input name="trusted_seller_above_gbp" type="number" min="0">, fewer than <input name="trusted_seller_feedback" type="number" min="0"> feedback</label>
-        <label><input name="uk_sellers_only" type="checkbox"> UK sellers only (fewer fakes, no import fees)</label>
-        <label><input name="alerts_enabled" type="checkbox"> Send Telegram alerts</label>
-        <label>Max alerts per scan <input name="max_alerts_per_scan" type="number" min="1"></label>
-        <label>Cards searched individually per scan <input name="targeted_per_scan" type="number" min="0" max="100"></label>
-        <label>Price guide
-          <select name="price_source">
-            <option value="lowest">Lowest of Cardmarket and TCGplayer (safest)</option>
-            <option value="cardmarket">Cardmarket (EU, closest to UK prices)</option>
-            <option value="tcgplayer">TCGplayer (US)</option>
-          </select>
-        </label>
-        <button type="submit" class="primary">Save</button> <span id="prefs-saved" class="hint"></span>
-      </form>
-      <p class="hint">"Fair price" = the lower of the price guide and what other eBay sellers typically
-        ask for that card, × condition: NM 100%, LP 85%, MP 70%,
-        HP 55%, damaged 40%, not stated 80%. Prices are a guide. Always check photos before buying.</p>
+      <form id="prefs">
+        <div class="panel">
+          <h2>💷 Deal rules</h2>
+          <label class="row">Alert when at least <input name="min_discount_pct" type="number" min="0" max="90">% under the fair price</label>
+          <label class="row">…or for ⭐ starred cards <input name="priority_discount_pct" type="number" min="0" max="90">% under</label>
+          <label class="row">Minimum saving £<input name="min_saving_gbp" type="number" min="0"></label>
+          <label class="row">Accept MP/HP (played) copies for cards worth over £<input name="played_ok_above_gbp" type="number" min="0"></label>
+          <label class="row tog"><input name="allow_damaged" type="checkbox"> Accept damaged copies</label>
+          <label class="row">Price guide
+            <select name="price_source">
+              <option value="lowest">Lowest of Cardmarket and TCGplayer (safest)</option>
+              <option value="cardmarket">Cardmarket (Europe)</option>
+              <option value="tcgplayer">TCGplayer (US)</option>
+            </select>
+          </label>
+          <p class="hint">Fair price = the lower of the price guide and what other eBay sellers typically ask,
+            × condition (NM 100%, LP 85%, MP 70%, HP 55%, damaged 40%, not stated 80%).</p>
+        </div>
 
-      <h2>Actions</h2>
-      <div class="actions">
-        <button id="scan-now">Scan eBay now</button>
-        <button id="refresh-cat">Update card list &amp; prices</button>
-        <button id="test-alert">Send test alert</button>
+        <div class="panel">
+          <h2>🛡️ Fake protection</h2>
+          <div class="photo-key">
+            <div><b>📷 Photo check</b> <span id="photo-state" class="badge"></span></div>
+            <p class="hint">Claude looks at each deal's photos before you're alerted and drops fakes, stickers and
+              wrong cards. Paste an Anthropic API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+              It's stored on your server and never shown again.</p>
+            <div class="frow">
+              <input id="photo-key" type="password" placeholder="sk-ant-…" autocomplete="off">
+              <button type="button" id="photo-save" class="btn">Save key</button>
+              <button type="button" id="photo-clear" class="btn ghost small">Remove</button>
+            </div>
+            <label class="row tog"><input name="photo_check_enabled" type="checkbox"> Check photos before alerting</label>
+          </div>
+          <label class="row">Ignore anything more than <input name="suspicious_above_pct" type="number" min="0" max="100">% under (almost always fake)</label>
+          <label class="row tog"><input name="uk_sellers_only" type="checkbox"> UK sellers only</label>
+          <label class="row">Ignore sellers with fewer than <input name="min_seller_feedback" type="number" min="0"> feedback</label>
+          <label class="row">…and for cards worth over £<input name="trusted_seller_above_gbp" type="number" min="0">, fewer than <input name="trusted_seller_feedback" type="number" min="0"></label>
+        </div>
+
+        <div class="panel">
+          <h2>🔔 Alerts &amp; searching</h2>
+          <label class="row tog"><input name="alerts_enabled" type="checkbox"> Send Telegram alerts</label>
+          <label class="row">Max alerts per scan <input name="max_alerts_per_scan" type="number" min="1"></label>
+          <label class="row">Cards searched one-by-one per scan <input name="targeted_per_scan" type="number" min="0" max="100"></label>
+        </div>
+        <div class="savebar"><button type="submit" class="btn primary">Save settings</button><span id="prefs-saved" class="hint"></span></div>
+      </form>
+
+      <div class="panel">
+        <h2>⚡ Actions</h2>
+        <div class="actions">
+          <button id="scan-now" class="btn">Scan eBay now</button>
+          <button id="refresh-cat" class="btn">Update card list &amp; prices</button>
+          <button id="test-alert" class="btn">Send test alert</button>
+        </div>
       </div>
-      <h2>System</h2>
-      <pre id="system" class="system"></pre>
+      <div class="panel">
+        <h2>🖥️ System</h2>
+        <pre id="system" class="system"></pre>
+      </div>
     </section>
   </main>
+
+  <dialog id="card-dialog"></dialog>
+  <dialog id="add-dialog">
+    <form method="dialog" id="add-form" class="add-form">
+      <h2>Add a missing card</h2>
+      <p class="hint">For anything not in the list (e.g. a rare promo). It's added to your checklist and searched on eBay.</p>
+      <label>Pokémon <select name="pokemon" id="add-poke"></select></label>
+      <label>Card name <input name="name" required placeholder="e.g. Ancient Mew"></label>
+      <label>Set <input name="set_name" placeholder="e.g. Wizards Black Star Promos"></label>
+      <div class="grid2">
+        <label>Number <input name="local_id" required placeholder="e.g. 4"></label>
+        <label>Set size <input name="set_official" inputmode="numeric" placeholder="e.g. 102"></label>
+      </div>
+      <label>Picture link (optional) <input name="image" type="url" placeholder="https://…"></label>
+      <div class="chips multi" id="add-vars">
+        <button type="button" data-v="holo" class="on">Holo</button><button type="button" data-v="normal">Normal</button>
+        <button type="button" data-v="reverse">Reverse</button><button type="button" data-v="firstEdition">1st Edition</button>
+      </div>
+      <div class="actions end">
+        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+        <button value="ok" class="btn primary">Add card</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

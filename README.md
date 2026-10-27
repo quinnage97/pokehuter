@@ -12,6 +12,8 @@ Telegram.
   (5% by default), and appear in "Priority watch" with the cheapest copy currently listed.
 - **Alert at £**: set your own price on any card. You'll be told whenever a copy is listed
   at or below it.
+- **📷 Photo check (optional)**: before alerting, Claude looks at the listing photos and drops
+  fakes, stickers and wrong cards. Paste an Anthropic API key on the Settings tab to turn it on.
 - **Played copies are welcome**: an LP/MP/HP copy is judged against what that condition is
   worth (NM 100%, LP 85%, MP 70%, HP 55%). MP/HP are only considered for cards worth more
   than £15 (adjustable), so cheap cards aren't bought battered.

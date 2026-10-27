@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
@@ -37,6 +37,7 @@ class Listing:
     feedback_score: int | None
     feedback_pct: float | None
     listed_at: str | None
+    images: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> float:
@@ -163,6 +164,10 @@ def parse_item(item: dict[str, Any], currency: str) -> Listing | None:
     image = (item.get("image") or {}).get("imageUrl") or next(
         (i.get("imageUrl") for i in item.get("thumbnailImages") or []), None
     )
+    images = [image] if image else []
+    for extra in item.get("additionalImages") or []:
+        if (url := extra.get("imageUrl")) and url not in images:
+            images.append(url)
     return Listing(
         item_id=str(item["itemId"]),
         title=str(item.get("title", "")),
@@ -176,4 +181,5 @@ def parse_item(item: dict[str, Any], currency: str) -> Listing | None:
         feedback_score=int(seller["feedbackScore"]) if "feedbackScore" in seller else None,
         feedback_pct=_float(seller.get("feedbackPercentage")),
         listed_at=item.get("itemCreationDate"),
+        images=images[:4],
     )

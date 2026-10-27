@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Optional eBay Partner Network campaign, only if you have one.
     ebay_affiliate_campaign_id: str | None = None
 
+    # Optional: lets Claude check listing photos for fakes (can also be pasted on the site).
+    anthropic_api_key: SecretStr | None = None
+    photo_check_model: str = "claude-opus-5-5"
+
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
 

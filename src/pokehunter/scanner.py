@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import statistics
 from dataclasses import dataclass
@@ -11,7 +12,8 @@ from .catalog import load_card_refs
 from .config import Settings
 from .db import Database, now_iso
 from .ebay import BudgetExhausted, EbayClient, EbayError, Listing
-from .matching import CONDITION_FACTOR, match_title
+from .matching import CONDITION_FACTOR, match_title, variant_label
+from .photocheck import REJECT, PhotoChecker
 
 log = logging.getLogger(__name__)
 DEAL_WINDOW_HOURS = 36  # how long a listing stays on the site after we last saw it
@@ -105,12 +107,18 @@ def search_query(card: dict[str, Any]) -> str:
 
 class Scanner:
     def __init__(
-        self, db: Database, settings: Settings, ebay: EbayClient, telegram: Telegram
+        self,
+        db: Database,
+        settings: Settings,
+        ebay: EbayClient,
+        telegram: Telegram,
+        photos: PhotoChecker | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.ebay = ebay
         self.telegram = telegram
+        self.photos = photos
 
     def pick_targets(self, count: int) -> list[dict[str, Any]]:
         """Cards to search individually this round: starred first, then least recently."""
@@ -228,15 +236,16 @@ class Scanner:
                     """
                     INSERT INTO listings (item_id, title, url, image, price, shipping,
                         shipping_known, total, condition, seller, feedback_score, feedback_pct,
-                        listed_at, first_seen, last_seen, match_item_id, warning)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        listed_at, first_seen, last_seen, match_item_id, warning, images_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(item_id) DO UPDATE SET
                         title=excluded.title, url=excluded.url, image=excluded.image,
                         price=excluded.price, shipping=excluded.shipping,
                         shipping_known=excluded.shipping_known, total=excluded.total,
                         condition=excluded.condition, feedback_score=excluded.feedback_score,
                         feedback_pct=excluded.feedback_pct, last_seen=excluded.last_seen,
-                        match_item_id=excluded.match_item_id, warning=excluded.warning
+                        match_item_id=excluded.match_item_id, warning=excluded.warning,
+                        images_json=excluded.images_json
                     """,
                     (
                         listing.item_id,
@@ -256,6 +265,7 @@ class Scanner:
                         timestamp,
                         item_id,
                         match.note or None,
+                        json.dumps(listing.images),
                     ),
                 )
         medians = ebay_medians(self.db)
@@ -269,6 +279,7 @@ class Scanner:
 
         # 4. Judge every recent listing with today's prices and rules.
         new_deals = self.reevaluate(cards, items, prefs, seen_now)
+        new_deals = await self.check_photos(new_deals, prefs)
         alerts = await self._send_alerts(new_deals, prefs, errors)
         deal_count = len(self.deals())
         with self.db.tx() as c:
@@ -330,7 +341,8 @@ class Scanner:
             )
             match, _ = match_title(row["title"], cards)
             verdict = evaluate(listing, row["condition"], item, prefs)
-            is_deal = bool(match) and verdict.is_deal
+            photo_ok = row["photo_verdict"] not in REJECT
+            is_deal = bool(match) and verdict.is_deal and photo_ok
             notes = [match.note] if match and match.note else []
             if verdict.warning:
                 notes.append(verdict.warning)
@@ -362,6 +374,56 @@ class Scanner:
             )
         return new_deals
 
+    async def check_photos(
+        self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Look at the photos of each new deal before alerting. Fakes are dropped; deals
+        beyond this scan's limit wait for the next scan rather than alerting unchecked."""
+        if not (self.photos and self.photos.ready and prefs["photo_check_enabled"]):
+            return new_deals
+        new_deals.sort(key=lambda d: (-d["priority"], -d["discount"]))
+        keep: list[dict[str, Any]] = []
+        checked = 0
+        for deal in new_deals:
+            row = self.db.one(
+                """
+                SELECT l.title, l.images_json, l.photo_verdict, i.variant, c.name, c.set_name,
+                       c.local_id, c.set_official
+                FROM listings l JOIN items i ON i.id = l.match_item_id
+                JOIN cards c ON c.id = i.card_id WHERE l.item_id = ?
+                """,
+                (deal["item_id"],),
+            )
+            if not row:
+                continue
+            if row["photo_verdict"] is None:
+                if checked >= limit:
+                    continue
+                checked += 1
+                number = row["local_id"] + (
+                    f"/{row['set_official']}" if row["set_official"] else ""
+                )
+                claimed = (
+                    f"{row['name']} from {row['set_name']}, number {number}, "
+                    f"{variant_label(row['variant'])}"
+                )
+                result = await self.photos.check(
+                    claimed, row["title"], json.loads(row["images_json"] or "[]")
+                )
+                with self.db.tx() as c:
+                    c.execute(
+                        "UPDATE listings SET photo_verdict=?, photo_reason=?,"
+                        " is_deal=CASE WHEN ? THEN 0 ELSE is_deal END WHERE item_id=?",
+                        (result.verdict, result.reason, int(result.rejected), deal["item_id"]),
+                    )
+                if result.rejected:
+                    log.info("photo check rejected %s: %s", deal["item_id"], result.reason)
+                    continue
+            elif row["photo_verdict"] in REJECT:
+                continue
+            keep.append(deal)
+        return keep
+
     async def _send_alerts(
         self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], errors: list[str]
     ) -> int:
@@ -391,22 +453,28 @@ class Scanner:
                 )
         return sent
 
-    def deals(self) -> list[dict[str, Any]]:
+    def listings(self, deals_only: bool = True, limit: int = 800) -> list[dict[str, Any]]:
+        """Recently seen listings for cards still wanted, best first."""
         cutoff = (datetime.now(UTC) - timedelta(hours=DEAL_WINDOW_HOURS)).isoformat()
         return self.db.query(
-            """
+            f"""
             SELECT l.item_id AS listing_id, l.*, i.variant, i.priority, i.target_price,
                    i.ebay_median_gbp, i.ebay_comps,
-                   c.name AS card_name, c.set_name, c.local_id, c.image AS card_image, c.pokemon
+                   c.name AS card_name, c.set_name, c.local_id, c.set_official, c.rarity,
+                   c.release_date, c.image AS card_image, c.image_alt, c.custom, c.pokemon
             FROM listings l
             JOIN items i ON i.id = l.match_item_id
             JOIN cards c ON c.id = i.card_id
-            WHERE l.is_deal = 1 AND l.dismissed = 0 AND i.owned = 0 AND i.hidden = 0
-              AND l.last_seen >= ?
-            ORDER BY i.priority DESC, l.discount_pct DESC
+            WHERE l.dismissed = 0 AND i.owned = 0 AND i.hidden = 0 AND l.last_seen >= ?
+              {"AND l.is_deal = 1" if deals_only else ""}
+            ORDER BY l.is_deal DESC, i.priority DESC, l.discount_pct DESC
+            LIMIT ?
             """,
-            (cutoff,),
+            (cutoff, limit),
         )
+
+    def deals(self) -> list[dict[str, Any]]:
+        return self.listings(deals_only=True)
 
     def priority_watch(self) -> list[dict[str, Any]]:
         """Cheapest recent listing for every starred card, deal or not."""
@@ -415,11 +483,12 @@ class Scanner:
             """
             SELECT i.id AS item, i.variant, i.market_gbp, i.target_price,
                    c.name AS card_name, c.set_name, c.local_id, c.image AS card_image,
-                   l.item_id AS listing_id, l.title, l.url, l.total, l.condition,
-                   l.fair_gbp, l.discount_pct, MIN(l.total) AS cheapest
+                   c.image_alt, c.custom, l.item_id AS listing_id, l.title, l.url, l.total,
+                   l.condition, l.fair_gbp, l.discount_pct, MIN(l.total) AS cheapest
             FROM items i JOIN cards c ON c.id = i.card_id
             LEFT JOIN listings l ON l.match_item_id = i.id AND l.last_seen >= ?
                  AND l.dismissed = 0
+                 AND COALESCE(l.photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')
             WHERE i.priority = 1 AND i.owned = 0
             GROUP BY i.id
             ORDER BY c.release_date, c.local_id

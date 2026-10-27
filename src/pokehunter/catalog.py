@@ -38,19 +38,55 @@ TCGPLAYER_KEYS = {
 }
 
 
+def _details(card: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = card.get("variants")
+    listed = raw if isinstance(raw, list) else card.get("variants_detailed") or []
+    return [d for d in listed if isinstance(d, dict) and d.get("type")]
+
+
+def stamped_key(detail: dict[str, Any]) -> str | None:
+    """'holo:set-logo' for a stamped printing; None for plain and 1st Edition copies."""
+    stamps = sorted(s for s in detail.get("stamp") or [] if s != "1st-edition")
+    if not stamps or detail.get("size") == "jumbo":
+        return None
+    return f"{detail['type']}:{'+'.join(stamps)}"
+
+
 def card_variants(card: dict[str, Any]) -> list[str]:
+    """Every printing a master set needs: plain versions first, then stamped promos."""
     raw = card.get("variants")
     found: set[str] = set()
     if isinstance(raw, dict):
         found = {k for k in VARIANT_ORDER if raw.get(k)}
-    for detail in card.get("variants_detailed") or []:
-        if not isinstance(detail, dict):
-            continue
-        if "1st-edition" in (detail.get("stamp") or []):
+    stamped: list[str] = []
+    for detail in _details(card):
+        stamps = detail.get("stamp") or []
+        if "1st-edition" in stamps:
             found.add("firstEdition")
-        elif detail.get("type") in ("normal", "holo", "reverse") and not detail.get("stamp"):
+        if key := stamped_key(detail):
+            if key not in stamped:
+                stamped.append(key)
+        elif not stamps and detail["type"] in ("normal", "holo", "reverse"):
             found.add(detail["type"])
-    return [v for v in VARIANT_ORDER if v in found] or ["normal"]
+    return ([v for v in VARIANT_ORDER if v in found] or ["normal"]) + stamped
+
+
+def variant_pricing(card: dict[str, Any]) -> dict[str, Any]:
+    """Prices kept per card plus any separate prices TCGdex has for stamped printings."""
+    stamped = {}
+    for detail in _details(card):
+        if (key := stamped_key(detail)) and detail.get("pricing"):
+            stamped[key] = detail["pricing"]
+    return {"card": card.get("pricing"), "variants": stamped}
+
+
+def guess_alt_image(set_id: str, local_id: str) -> str:
+    """Best-guess pokemontcg.io image, used when TCGdex has no picture.
+    TCGdex 'sv03.5' is 'sv3pt5' there; numbers lose their leading zeros."""
+    ptcg_set = set_id.replace(".5", "pt5")
+    ptcg_set = ptcg_set[:2] + ptcg_set[2:].lstrip("0") if ptcg_set.startswith("sv0") else ptcg_set
+    number = (local_id.lstrip("0") or "0") if local_id.isdigit() else local_id
+    return f"https://images.pokemontcg.io/{ptcg_set}/{number}.png"
 
 
 def _first_number(source: dict[str, Any] | None, keys: tuple[str, ...]) -> float | None:
@@ -73,8 +109,14 @@ def variant_price_gbp(
     pricing: dict[str, Any] | None, variant: str, fx: dict[str, float], source: str
 ) -> tuple[float | None, str | None]:
     pricing = pricing or {}
-    cm = _lowest_number(pricing.get("cardmarket"), CARDMARKET_KEYS[variant])
-    tp = _first_number(pricing.get("tcgplayer"), TCGPLAYER_KEYS[variant])
+    if "card" in pricing or "variants" in pricing:  # current storage format
+        if ":" in variant:  # stamped printing: only its own prices are meaningful
+            pricing = (pricing.get("variants") or {}).get(variant) or {}
+        else:
+            pricing = pricing.get("card") or {}
+    base = variant.split(":", 1)[0]
+    cm = _lowest_number(pricing.get("cardmarket"), CARDMARKET_KEYS[base])
+    tp = _first_number(pricing.get("tcgplayer"), TCGPLAYER_KEYS[base])
     options = {
         "cardmarket": cm * fx["EUR"] if cm else None,
         "tcgplayer": tp * fx["USD"] if tp else None,
@@ -167,13 +209,14 @@ async def refresh_catalog(db: Database, settings: Settings, http: httpx.AsyncCli
             c.execute(
                 """
                 INSERT INTO cards (id, pokemon, name, local_id, set_id, set_name, set_official,
-                    release_date, serie_name, rarity, image, pricing_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    release_date, serie_name, rarity, image, image_alt, pricing_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name=excluded.name, local_id=excluded.local_id, set_name=excluded.set_name,
                     set_official=excluded.set_official, release_date=excluded.release_date,
                     serie_name=excluded.serie_name, rarity=excluded.rarity, image=excluded.image,
-                    pricing_json=excluded.pricing_json, updated_at=excluded.updated_at
+                    image_alt=excluded.image_alt, pricing_json=excluded.pricing_json,
+                    updated_at=excluded.updated_at
                 """,
                 (
                     card["id"],
@@ -187,12 +230,13 @@ async def refresh_catalog(db: Database, settings: Settings, http: httpx.AsyncCli
                     set_info.get("serieName"),
                     card.get("rarity"),
                     image,
-                    json.dumps(card.get("pricing")),
+                    guess_alt_image(card["set"]["id"], str(card.get("localId", ""))),
+                    json.dumps(variant_pricing(card)),
                     timestamp,
                 ),
             )
             for variant in card_variants(card):
-                market, used = variant_price_gbp(card.get("pricing"), variant, fx, source)
+                market, used = variant_price_gbp(variant_pricing(card), variant, fx, source)
                 c.execute(
                     """
                     INSERT INTO items (id, card_id, variant, market_gbp, price_source)

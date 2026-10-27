@@ -6,7 +6,9 @@ from typing import Any
 import httpx
 
 from .config import Settings
-from .matching import CONDITION_LABEL, VARIANT_LABEL
+from .matching import CONDITION_LABEL, variant_label
+
+PHOTO_LABEL = {"genuine": "looks genuine", "unsure": "couldn't tell from the photos"}
 
 
 class AlertError(RuntimeError):
@@ -15,7 +17,7 @@ class AlertError(RuntimeError):
 
 def format_deal(deal: dict[str, Any], public_url: str | None) -> str:
     star = "⭐ PRIORITY CARD\n" if deal.get("priority") else ""
-    variant = VARIANT_LABEL.get(deal["variant"], deal["variant"])
+    variant = variant_label(deal["variant"])
     price_line = f"<b>£{deal['total']:.2f}</b> delivered"
     if deal.get("fair_gbp") and deal.get("discount_pct") is not None:
         price_line += (
@@ -41,6 +43,13 @@ def format_deal(deal: dict[str, Any], public_url: str | None) -> str:
     if deal.get("feedback_score") is not None:
         rating = deal.get("feedback_pct") or "?"
         lines.append(f"Seller: {deal['feedback_score']} feedback ({rating}%)")
+    verdict = deal.get("photo_verdict")
+    if verdict:
+        icon = "✅" if verdict == "genuine" else "🤔"
+        lines.append(
+            f"{icon} Photo check: {PHOTO_LABEL.get(verdict, verdict)}"
+            + (f" ({html.escape(deal['photo_reason'])})" if deal.get("photo_reason") else "")
+        )
     if deal.get("warning"):
         lines.append(f"⚠️ {html.escape(deal['warning'])}")
     link = f'<a href="{html.escape(deal["url"])}">Open on eBay</a>'

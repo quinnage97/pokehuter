@@ -20,7 +20,8 @@ from .catalog import refresh_catalog, reprice
 from .config import Settings
 from .db import Database, now_iso
 from .ebay import EbayClient
-from .matching import CONDITION_LABEL, VARIANT_LABEL
+from .matching import CONDITION_LABEL, VARIANT_LABEL, variant_label
+from .photocheck import PhotoChecker
 from .scanner import Scanner
 
 log = logging.getLogger(__name__)
@@ -36,8 +37,9 @@ class Engine:
         self.db = Database(settings.database_path)
         self.http = http
         self.telegram = Telegram(settings, http)
+        self.photos = PhotoChecker(settings, http, self.db)
         self.scanner = Scanner(
-            self.db, settings, EbayClient(settings, http, self.db), self.telegram
+            self.db, settings, EbayClient(settings, http, self.db), self.telegram, self.photos
         )
         self.wake = asyncio.Event()
         self.busy: str | None = None
@@ -166,17 +168,24 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             "fx": e.db.get_kv("fx"),
             "ebay_ready": settings.ebay_ready,
             "telegram_ready": settings.telegram_ready,
+            "photo_check_ready": e.photos.ready,
             "error": e.last_error,
             "progress": counts,
             "interval_minutes": settings.scan_interval_minutes,
         }
 
+    def labelled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for row in rows:
+            if row.get("variant"):
+                row["variant_label"] = variant_label(row["variant"])
+        return rows
+
     @app.get("/api/deals")
-    async def deals(request: Request) -> dict[str, Any]:
+    async def deals(request: Request, everything: bool = False) -> dict[str, Any]:
         e = engine(request)
         return {
-            "deals": e.scanner.deals(),
-            "watch": e.scanner.priority_watch(),
+            "deals": labelled(e.scanner.listings(deals_only=not everything)),
+            "watch": labelled(e.scanner.priority_watch()),
             "conditions": CONDITION_LABEL,
             "variants": VARIANT_LABEL,
         }
@@ -186,15 +195,86 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
         rows = engine(request).db.query(
             """
             SELECT i.id, i.card_id, i.variant, i.owned, i.hidden, i.priority, i.target_price,
-                   i.market_gbp, i.price_source, c.pokemon, c.name, c.local_id, c.set_id,
-                   c.set_name, c.set_official, c.release_date, c.rarity, c.image
+                   i.market_gbp, i.price_source, i.ebay_median_gbp, i.ebay_comps,
+                   c.pokemon, c.name, c.local_id, c.set_id, c.set_name, c.set_official,
+                   c.release_date, c.serie_name, c.rarity, c.image, c.image_alt, c.custom,
+                   (SELECT l.image FROM listings l JOIN items i2 ON i2.id = l.match_item_id
+                    WHERE i2.card_id = c.id AND l.image IS NOT NULL
+                      AND COALESCE(l.photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')
+                    ORDER BY l.last_seen DESC LIMIT 1) AS ebay_image
             FROM items i JOIN cards c ON c.id = i.card_id
             ORDER BY c.release_date, c.set_id, CAST(c.local_id AS INTEGER), c.local_id,
                      CASE i.variant WHEN 'firstEdition' THEN 0 WHEN 'holo' THEN 1
                                     WHEN 'normal' THEN 2 ELSE 3 END
             """
         )
-        return {"items": rows, "variants": VARIANT_LABEL}
+        return {"items": labelled(rows), "variants": VARIANT_LABEL}
+
+    @app.post("/api/cards/custom")
+    async def add_card(request: Request, card: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Add a card TCGdex doesn't know about, so it can be ticked off and searched for."""
+        e = engine(request)
+        name = str(card.get("name") or "").strip()
+        local_id = str(card.get("local_id") or "").strip()
+        pokemon = str(card.get("pokemon") or "").strip()
+        if not name or not local_id or pokemon not in settings.pokemon_names:
+            raise HTTPException(400, "Name, number and Pokémon are required")
+        try:
+            official = int(card["set_official"]) if card.get("set_official") else None
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, "Set size must be a number") from exc
+        variants = [v for v in card.get("variants") or ["holo"] if v in VARIANT_LABEL] or ["holo"]
+        card_id = f"custom-{secrets.token_hex(4)}"
+        with e.db.tx() as c:
+            c.execute(
+                """
+                INSERT INTO cards (id, pokemon, name, local_id, set_id, set_name, set_official,
+                    release_date, image, custom, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    card_id,
+                    pokemon,
+                    name,
+                    local_id,
+                    "custom",
+                    str(card.get("set_name") or "Added by you").strip(),
+                    official,
+                    str(card.get("release_date") or "9999"),
+                    str(card.get("image") or "").strip() or None,
+                    now_iso(),
+                ),
+            )
+            c.executemany(
+                "INSERT INTO items (id, card_id, variant) VALUES (?, ?, ?)",
+                [(f"{card_id}:{v}", card_id, v) for v in variants],
+            )
+        return {"id": card_id}
+
+    @app.delete("/api/cards/custom/{card_id}")
+    async def delete_card(request: Request, card_id: str) -> dict[str, bool]:
+        e = engine(request)
+        if not e.db.one("SELECT id FROM cards WHERE id=? AND custom=1", (card_id,)):
+            raise HTTPException(404, "Only cards you added can be removed")
+        with e.db.tx() as c:
+            c.execute(
+                "DELETE FROM listings WHERE match_item_id IN"
+                " (SELECT id FROM items WHERE card_id=?)",
+                (card_id,),
+            )
+            c.execute("DELETE FROM items WHERE card_id=?", (card_id,))
+            c.execute("DELETE FROM cards WHERE id=?", (card_id,))
+        return {"ok": True}
+
+    @app.post("/api/photo-check-key")
+    async def set_photo_key(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Store (or clear, with an empty value) the Anthropic API key. It is never sent back."""
+        e = engine(request)
+        key = str(body.get("key") or "").strip()
+        if key and not key.startswith("sk-ant-"):
+            raise HTTPException(400, "That doesn't look like an Anthropic API key (sk-ant-...)")
+        e.db.set_kv("anthropic_api_key", key or None)
+        return {"photo_check_ready": e.photos.ready}
 
     @app.post("/api/items/{item_id:path}")
     async def update_item(
