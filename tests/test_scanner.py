@@ -271,7 +271,7 @@ class StubPhotos:
         self.verdict = verdict
         self.calls = []
 
-    async def check(self, claimed, title, image_urls):
+    async def check(self, claimed, title, image_urls, examples=None):
         from pokehunter.photocheck import PhotoVerdict
 
         self.calls.append((claimed, title, image_urls))

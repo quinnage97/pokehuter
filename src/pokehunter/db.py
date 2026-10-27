@@ -81,6 +81,21 @@ CREATE TABLE IF NOT EXISTS runs (
     error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS fake_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id TEXT NOT NULL,
+    item_id TEXT,
+    title TEXT NOT NULL,
+    seller TEXT,
+    total REAL,
+    fair_gbp REAL,
+    reason TEXT NOT NULL,
+    image TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS basket (listing_id TEXT PRIMARY KEY, added_at TEXT NOT NULL);
+
 CREATE TABLE IF NOT EXISTS api_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
@@ -95,6 +110,7 @@ MIGRATIONS = [
     ("listings", "images_json", "TEXT"),
     ("listings", "photo_verdict", "TEXT"),
     ("listings", "photo_reason", "TEXT"),
+    ("listings", "user_verdict", "TEXT"),
 ]
 
 # Defaults for the options shown on the website's Settings tab.
@@ -111,6 +127,7 @@ DEFAULT_PREFS: dict[str, Any] = {
     "trusted_seller_feedback": 50,  # ...need a seller with at least this much feedback
     "uk_sellers_only": True,
     "photo_check_enabled": True,
+    "block_reported_sellers": True,
     "alerts_enabled": True,
     "max_alerts_per_scan": 10,
     "targeted_per_scan": 30,

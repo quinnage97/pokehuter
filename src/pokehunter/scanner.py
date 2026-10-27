@@ -12,6 +12,7 @@ from .catalog import load_card_refs
 from .config import Settings
 from .db import Database, now_iso
 from .ebay import BudgetExhausted, EbayClient, EbayError, Listing
+from .learning import Signals, learn
 from .matching import CONDITION_FACTOR, match_title, variant_label
 from .photocheck import REJECT, PhotoChecker
 
@@ -122,6 +123,7 @@ class Scanner:
         self.ebay = ebay
         self.telegram = telegram
         self.photos = photos
+        self.signals = Signals()
 
     def pick_targets(self, count: int) -> list[dict[str, Any]]:
         """Cards to search individually this round: starred first, then least recently."""
@@ -281,6 +283,7 @@ class Scanner:
         items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
 
         # 4. Judge every recent listing with today's prices and rules.
+        self.signals = learn(self.db, block_sellers=prefs["block_reported_sellers"])
         new_deals = self.reevaluate(cards, items, prefs, seen_now)
         new_deals = await self.check_photos(new_deals, prefs)
         alerts = await self._send_alerts(new_deals, prefs, errors)
@@ -314,6 +317,13 @@ class Scanner:
             "alerts": alerts,
             "errors": errors,
         }
+
+    def refresh_flags(self) -> None:
+        """Re-judge stored listings straight away, e.g. after a fake report."""
+        prefs = self.db.prefs()
+        self.signals = learn(self.db, block_sellers=prefs["block_reported_sellers"])
+        items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
+        self.reevaluate(load_card_refs(self.db), items, prefs, set())
 
     def reevaluate(
         self,
@@ -350,8 +360,11 @@ class Scanner:
             )
             verdict = evaluate(listing, row["condition"], item, prefs)
             photo_ok = row["photo_verdict"] not in REJECT
-            is_deal = bool(match) and verdict.is_deal and photo_ok
+            learned = self.signals.flag(item_id, row["title"], row["seller"], row["total"])
+            is_deal = bool(match) and verdict.is_deal and photo_ok and not learned
             notes = [match.note] if match and match.note else []
+            if learned:
+                notes.insert(0, "🚩 Likely fake: " + learned)
             if verdict.warning:
                 notes.append(verdict.warning)
             updates.append(
@@ -396,8 +409,8 @@ class Scanner:
         for deal in new_deals:
             row = self.db.one(
                 """
-                SELECT l.title, l.images_json, l.photo_verdict, i.variant, c.name, c.set_name,
-                       c.local_id, c.set_official
+                SELECT l.title, l.images_json, l.photo_verdict, i.variant, i.card_id, c.name,
+                       c.set_name, c.local_id, c.set_official
                 FROM listings l JOIN items i ON i.id = l.match_item_id
                 JOIN cards c ON c.id = i.card_id WHERE l.item_id = ?
                 """,
@@ -416,8 +429,9 @@ class Scanner:
                     f"{row['name']} from {row['set_name']}, number {number}, "
                     f"{variant_label(row['variant'])}"
                 )
+                examples = self.signals.reasons.get(row["card_id"], [])
                 result = await self.photos.check(
-                    claimed, row["title"], json.loads(row["images_json"] or "[]")
+                    claimed, row["title"], json.loads(row["images_json"] or "[]"), examples
                 )
                 with self.db.tx() as c:
                     c.execute(

@@ -14,6 +14,11 @@ Telegram.
   at or below it.
 - **📷 Photo check (optional)**: before alerting, Claude looks at the listing photos and drops
   fakes, stickers and wrong cards. Paste an Anthropic API key on the Settings tab to turn it on.
+- **🚩 Teach it fakes**: mark any listing as fake and the bot blocks that seller, learns telltale
+  title words and fake price levels, and tells the photo check what to look for. All visible
+  and undoable under Settings → What the bot has learned.
+- **🧺 Basket & price-up**: add listings to a basket to see the total with postage and the saving,
+  or select card versions in the Collection to add up what they'd cost right now.
 - **Played copies are welcome**: an LP/MP/HP copy is judged against what that condition is
   worth (NM 100%, LP 85%, MP 70%, HP 55%). MP/HP are only considered for cards worth more
   than £15 (adjustable), so cheap cards aren't bought battered.

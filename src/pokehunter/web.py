@@ -21,6 +21,7 @@ from .catalog import refresh_catalog, reprice
 from .config import Settings
 from .db import Database, now_iso
 from .ebay import EbayClient
+from .learning import learn, record_fake, summary, undo_fake
 from .matching import CONDITION_LABEL, VARIANT_LABEL, variant_label
 from .photocheck import PhotoChecker
 from .scanner import Scanner
@@ -199,12 +200,22 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
                    i.market_gbp, i.price_source, i.ebay_median_gbp, i.ebay_comps,
                    c.pokemon, c.name, c.local_id, c.set_id, c.set_name, c.set_official,
                    c.release_date, c.serie_name, c.rarity, c.image, c.image_alt, c.custom,
-                   c.image_override
+                   c.image_override, cheap.listing_id AS cheapest_listing,
+                   cheap.total AS cheapest_total, cheap.condition AS cheapest_condition
             FROM items i JOIN cards c ON c.id = i.card_id
+            LEFT JOIN (
+                SELECT match_item_id, item_id AS listing_id, MIN(total) AS total, condition
+                FROM listings
+                WHERE dismissed = 0 AND last_seen >= :cutoff AND user_verdict IS NULL
+                  AND COALESCE(photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')
+                  AND COALESCE(warning, '') NOT LIKE '%Likely fake%'
+                GROUP BY match_item_id
+            ) cheap ON cheap.match_item_id = i.id
             ORDER BY c.release_date, c.set_id, CAST(c.local_id AS INTEGER), c.local_id,
                      CASE i.variant WHEN 'firstEdition' THEN 0 WHEN 'holo' THEN 1
                                     WHEN 'normal' THEN 2 ELSE 3 END
-            """
+            """,
+            {"cutoff": (datetime.now(UTC) - timedelta(hours=36)).isoformat()},
         )
         return {"items": labelled(rows), "variants": VARIANT_LABEL}
 
@@ -344,6 +355,109 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
         if changes.get("priority"):
             e.wake.set()  # search a newly starred card straight away
         return e.db.one("SELECT * FROM items WHERE id=?", (item_id,)) or {}
+
+    @app.post("/api/listings/{listing_id}/fake")
+    async def report_fake(
+        request: Request, listing_id: str, body: dict[str, Any] = Body(default={})
+    ) -> dict[str, Any]:
+        e = engine(request)
+        try:
+            report_id = record_fake(e.db, listing_id, str(body.get("reason") or ""))
+        except KeyError as exc:
+            raise HTTPException(404, "Unknown listing") from exc
+        with e.db.tx() as c:
+            c.execute("DELETE FROM basket WHERE listing_id = ?", (listing_id,))
+        e.scanner.refresh_flags()
+        return {"id": report_id, **summary(e.db, e.scanner.signals)}
+
+    @app.get("/api/learning")
+    async def learning_summary(request: Request) -> dict[str, Any]:
+        e = engine(request)
+        e.scanner.signals = learn(e.db, block_sellers=e.db.prefs()["block_reported_sellers"])
+        return summary(e.db, e.scanner.signals)
+
+    @app.post("/api/learning/undo/{report_id}")
+    async def learning_undo(request: Request, report_id: int) -> dict[str, Any]:
+        e = engine(request)
+        try:
+            undo_fake(e.db, report_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Unknown report") from exc
+        e.scanner.refresh_flags()
+        return summary(e.db, e.scanner.signals)
+
+    @app.post("/api/learning/ignore-word")
+    async def learning_ignore(request: Request, body: dict[str, Any] = Body(...)) -> dict:
+        e = engine(request)
+        word = str(body.get("word") or "").strip().lower()
+        ignored = set(e.db.get_kv("ignored_fake_words", []) or [])
+        if body.get("restore"):
+            ignored.discard(word)
+        elif word:
+            ignored.add(word)
+        e.db.set_kv("ignored_fake_words", sorted(ignored))
+        e.scanner.refresh_flags()
+        return summary(e.db, e.scanner.signals)
+
+    def basket_rows(e: Engine) -> list[dict[str, Any]]:
+        return labelled(
+            e.db.query(
+                """
+                SELECT b.added_at, l.item_id AS listing_id, l.title, l.url, l.image, l.price,
+                       l.shipping, l.shipping_known, l.total, l.condition, l.seller,
+                       l.fair_gbp, l.last_seen, i.id AS match_item_id, i.variant,
+                       c.name AS card_name, c.set_name, c.local_id, c.image AS card_image,
+                       c.image_alt, c.custom, c.image_override
+                FROM basket b
+                JOIN listings l ON l.item_id = b.listing_id
+                LEFT JOIN items i ON i.id = l.match_item_id
+                LEFT JOIN cards c ON c.id = i.card_id
+                ORDER BY b.added_at
+                """
+            )
+        )
+
+    @app.get("/api/basket")
+    async def basket(request: Request) -> dict[str, Any]:
+        return {"items": basket_rows(engine(request))}
+
+    @app.post("/api/basket")
+    async def basket_add(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        e = engine(request)
+        ids = body.get("listing_ids") or [body.get("listing_id")]
+        with e.db.tx() as c:
+            for listing_id in filter(None, ids):
+                if c.execute("SELECT 1 FROM listings WHERE item_id=?", (listing_id,)).fetchone():
+                    c.execute(
+                        "INSERT OR IGNORE INTO basket (listing_id, added_at) VALUES (?, ?)",
+                        (listing_id, now_iso()),
+                    )
+        return {"items": basket_rows(e)}
+
+    @app.delete("/api/basket/{listing_id}")
+    async def basket_remove(request: Request, listing_id: str) -> dict[str, Any]:
+        e = engine(request)
+        with e.db.tx() as c:
+            if listing_id == "all":
+                c.execute("DELETE FROM basket")
+            else:
+                c.execute("DELETE FROM basket WHERE listing_id=?", (listing_id,))
+        return {"items": basket_rows(e)}
+
+    @app.post("/api/basket/bought")
+    async def basket_bought(request: Request) -> dict[str, Any]:
+        """We bought everything in the basket: tick the cards off and empty it."""
+        e = engine(request)
+        with e.db.tx() as c:
+            c.execute(
+                "UPDATE items SET owned = 1 WHERE id IN (SELECT l.match_item_id FROM basket b"
+                " JOIN listings l ON l.item_id = b.listing_id)"
+            )
+            c.execute(
+                "UPDATE listings SET dismissed = 1 WHERE item_id IN (SELECT listing_id FROM basket)"
+            )
+            c.execute("DELETE FROM basket")
+        return {"items": []}
 
     @app.post("/api/listings/{listing_id}/dismiss")
     async def dismiss(request: Request, listing_id: str) -> dict[str, bool]:

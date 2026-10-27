@@ -43,7 +43,7 @@ body {
   font: 15px/1.45 "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--ink);
-  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px);
+  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 90px);
 }
 a { color: var(--accent); }
 h2 { font-size: 18px; font-weight: 900; margin: 0 0 10px; }
@@ -269,6 +269,38 @@ label.row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-
 .pick img { width: 100%; aspect-ratio: 63/88; object-fit: contain; display: block; max-height: none; }
 #pick-url { flex: 1 1 200px; }
 
+/* basket, price-up and fake reports */
+.btn.icon { padding: 9px 11px; }
+.btn.on { background: var(--accent-soft); border-color: var(--accent); }
+.chips span.badge { padding: 5px 10px; }
+.floatbar {
+  position: fixed; left: 12px; right: 12px; z-index: 25;
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 10px);
+  background: var(--ink); color: var(--card); border-radius: 16px; padding: 10px 12px; box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  max-width: 760px; margin: 0 auto; font: inherit; font-size: 14px; border: 0; text-align: left;
+}
+.floatbar[hidden] { display: none; }
+.floatbar.basket { cursor: pointer; }
+#pick-bar:not([hidden]) ~ #basket-bar { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 92px); }
+.floatbar .sum { display: flex; flex-direction: column; gap: 1px; }
+.floatbar .btn.ghost { color: var(--card); border-color: rgba(255, 255, 255, .3); }
+@media (min-width: 820px) { .floatbar { bottom: 16px; } #pick-bar:not([hidden]) ~ #basket-bar { bottom: 96px; } }
+.variant.pickable { cursor: pointer; border-radius: 8px; padding: 6px; margin-top: 6px; border: 1px dashed var(--line); }
+.variant.picked { background: var(--accent-soft); border: 1px solid var(--accent); }
+.pickbox { width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--line); display: grid; place-items: center;
+  flex: none; font-weight: 900; color: #fff; font-size: 13px; }
+.picked .pickbox { background: var(--accent); border-color: var(--accent); }
+.vname { flex: 1; font-weight: 800; }
+.brow { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.bthumb { width: 54px !important; height: 54px; aspect-ratio: auto !important; object-fit: cover; border-radius: 8px; flex: none; padding: 0; font-size: 9px; }
+.bmain { flex: 1; min-width: 0; font-size: 14px; }
+.bside { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.totals { margin-top: 12px; background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+.totals div { display: flex; justify-content: space-between; padding: 2px 0; }
+.totals .grand { font-size: 18px; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; }
+.totals .save b { color: var(--good); }
+
 /* dialogs + toast */
 dialog {
   border: 0; border-radius: 20px; padding: 0; background: var(--card); color: var(--ink); width: min(560px, calc(100vw - 24px));
@@ -281,7 +313,7 @@ dialog::backdrop { background: rgba(10, 8, 20, .6); }
 .add-form { padding: 18px; display: flex; flex-direction: column; gap: 10px; }
 .add-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 800; font-size: 13.5px; }
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h) + 20px + env(safe-area-inset-bottom));
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(76px + env(safe-area-inset-top));
   background: var(--ink); color: var(--card); padding: 10px 16px; border-radius: 12px; font-weight: 800; z-index: 50;
   box-shadow: var(--shadow); max-width: calc(100vw - 32px);
 }

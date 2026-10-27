@@ -14,6 +14,9 @@ const state = {
   items: [],
   status: null,
   f: { ...FILTER_DEFAULTS, ...JSON.parse(store("filters", "{}")) },
+  basket: new Map(),
+  picking: false,
+  picked: new Set(),
   c: { q: "", poke: store("cpoke", "All"), status: store("cstatus", "need"), era: "", star: false, stamped: true, hidden: false },
 };
 
@@ -77,6 +80,7 @@ window.nextPicture = (img) => {
 };
 function showPicture(src, title, extra = "") {
   const d = $("#card-dialog");
+  d.onclick = (e) => { if (e.target === d) d.close(); };
   d.innerHTML = `<div class="dlg"><button class="btn ghost small close" onclick="this.closest('dialog').close()">Close</button>
     <h2>${esc(title)}</h2>${src}${extra}</div>`;
   d.showModal();
@@ -93,7 +97,8 @@ function showTab(tab) {
   $$("main > section").forEach((s) => (s.hidden = s.id !== "tab-" + tab));
   store("tab", null, tab);
   if (tab === "checklist") loadCards();
-  if (tab === "settings") loadPrefs();
+  if (tab === "settings") { loadPrefs(); loadLearning(); }
+  $("#pick-bar").hidden = tab !== "checklist" || !state.picking;
   window.scrollTo({ top: 0 });
 }
 
@@ -288,8 +293,10 @@ function dealCard(d) {
     </div>
     <div class="bar">
       <a class="btn primary" href="${esc(d.url)}" target="_blank" rel="noopener">Open on eBay</a>
-      <button class="btn" data-act="got" title="We bought it: tick it off">Got it ✓</button>
-      <button class="btn ghost" data-act="dismiss" title="Hide this listing">✕</button>
+      <button class="btn icon ${state.basket.has(d.listing_id) ? "on" : ""}" data-act="basket" title="Add to basket to total up">🧺</button>
+      <button class="btn icon" data-act="got" title="We bought it: tick it off">✓</button>
+      <button class="btn icon" data-act="fake" title="This is a fake: teach the bot">🚩</button>
+      <button class="btn icon ghost" data-act="dismiss" title="Hide this listing">✕</button>
     </div>
   </article>`;
 }
@@ -302,6 +309,13 @@ $("#deals").addEventListener("click", async (e) => {
   }
   const btn = e.target.closest("button[data-act]");
   if (!btn) return;
+  if (btn.dataset.act === "basket") {
+    const id = card.dataset.listing;
+    if (state.basket.has(id)) await basketRemove(id); else await basketAdd([id]);
+    btn.classList.toggle("on", state.basket.has(id));
+    return;
+  }
+  if (btn.dataset.act === "fake") return reportFake(card.dataset.listing, $(".name", card).textContent);
   if (btn.dataset.act === "got") {
     await api(`/api/items/${encodeURIComponent(card.dataset.item)}`, { owned: true });
     toast("Ticked off in your collection 🎉");
@@ -423,6 +437,15 @@ function tile(card) {
   </div>`;
 }
 function variantRow(v) {
+  if (state.picking) {
+    const now = v.cheapest_total != null ? `eBay now <b>${gbp(v.cheapest_total)}</b> (${esc(v.cheapest_condition)})` : "none listed now";
+    return `
+  <div class="variant pickable ${state.picked.has(v.id) ? "picked" : ""}" data-pick="${esc(v.id)}">
+    <div class="vtop"><span class="pickbox">${state.picked.has(v.id) ? "✓" : ""}</span><span class="vname">${esc(v.variant_label || v.variant)}</span>
+      <span class="mk">${gbp(v.market_gbp)}</span></div>
+    <div class="vbot">${now}</div>
+  </div>`;
+  }
   return `
   <div class="variant" data-id="${esc(v.id)}">
     <div class="vtop">
@@ -454,6 +477,15 @@ $("#checklist").addEventListener("change", async (e) => {
   }
 });
 $("#checklist").addEventListener("click", async (e) => {
+  const pick = e.target.closest("[data-pick]");
+  if (pick) {
+    const id = pick.dataset.pick;
+    state.picked.has(id) ? state.picked.delete(id) : state.picked.add(id);
+    pick.classList.toggle("picked", state.picked.has(id));
+    $(".pickbox", pick).textContent = state.picked.has(id) ? "✓" : "";
+    renderPickBar();
+    return;
+  }
   const remove = e.target.closest("[data-remove]");
   if (remove) {
     if (!confirm("Remove this card you added?")) return;
@@ -484,6 +516,169 @@ $("#checklist").addEventListener("click", async (e) => {
     await saveItem(row, { hidden: !local.hidden });
     renderChecklist();
   }
+});
+
+// ---------------------------------------------------------------- price-up mode
+$("#pick-mode").addEventListener("click", () => {
+  state.picking = !state.picking;
+  if (!state.picking) state.picked.clear();
+  $("#pick-mode").classList.toggle("on", state.picking);
+  $("#pick-mode").textContent = state.picking ? "Done pricing" : "🧮 Price up cards";
+  renderChecklist();
+  renderPickBar();
+});
+function renderPickBar() {
+  const bar = $("#pick-bar");
+  if (!state.picking) { bar.hidden = true; return; }
+  const chosen = state.items.filter((i) => state.picked.has(i.id));
+  const guide = chosen.reduce((s, i) => s + (i.market_gbp || 0), 0);
+  const listed = chosen.filter((i) => i.cheapest_total != null);
+  const now = listed.reduce((s, i) => s + i.cheapest_total, 0);
+  bar.hidden = false;
+  bar.innerHTML = chosen.length
+    ? `<div class="sum"><b>${chosen.length} selected</b>
+        <span>Price guide ${gbp(guide)}${chosen.some((i) => i.market_gbp == null) ? "+" : ""}</span>
+        <span>Cheapest on eBay now <b>${listed.length ? gbp(now) : "–"}</b>${listed.length < chosen.length ? ` (${listed.length} of ${chosen.length} listed)` : ""}</span></div>
+       <div class="actions">${listed.length ? `<button class="btn primary small" id="pick-basket">🧺 Add cheapest to basket</button>` : ""}
+         <button class="btn ghost small" id="pick-clear">Clear</button></div>`
+    : `<div class="sum">Tap card versions to add up what they'd cost.</div>`;
+}
+$("#pick-bar").addEventListener("click", async (e) => {
+  if (e.target.id === "pick-clear") { state.picked.clear(); renderChecklist(); renderPickBar(); }
+  if (e.target.id === "pick-basket") {
+    const ids = state.items.filter((i) => state.picked.has(i.id) && i.cheapest_listing).map((i) => i.cheapest_listing);
+    await basketAdd(ids);
+    toast(`Added ${ids.length} listing${ids.length === 1 ? "" : "s"} to the basket 🧺`);
+  }
+});
+
+// ---------------------------------------------------------------- basket
+async function loadBasket() {
+  const { items } = await api("/api/basket");
+  setBasket(items);
+}
+function setBasket(items) {
+  state.basket = new Map(items.map((i) => [i.listing_id, i]));
+  const bar = $("#basket-bar");
+  bar.hidden = !items.length;
+  if (state.listings.length) renderDeals();
+  if (!items.length) return;
+  const total = items.reduce((s, i) => s + i.total, 0);
+  bar.innerHTML = `<span>🧺 <b>${items.length}</b> in basket · <b>${gbp(total)}</b></span><button class="btn primary small">View</button>`;
+}
+async function basketAdd(ids) {
+  const { items } = await api("/api/basket", { listing_ids: ids });
+  setBasket(items);
+  toast("Added to basket 🧺");
+}
+async function basketRemove(id) {
+  const { items } = await api(`/api/basket/${encodeURIComponent(id)}`, undefined, "DELETE");
+  setBasket(items);
+}
+$("#basket-bar").addEventListener("click", () => showBasket());
+function showBasket() {
+  const items = [...state.basket.values()];
+  const cards = items.reduce((s, i) => s + i.price, 0);
+  const post = items.reduce((s, i) => s + i.shipping, 0);
+  const fair = items.reduce((s, i) => s + (i.fair_gbp || 0), 0);
+  const bySeller = {};
+  items.forEach((i) => (bySeller[i.seller] = (bySeller[i.seller] || 0) + 1));
+  const shared = Object.entries(bySeller).filter(([, n]) => n > 1);
+  const rows = items.map((i) => `
+    <div class="brow">
+      ${picture(i.image ? [i.image] : cardSources(i), i.card_name, "bthumb")}
+      <div class="bmain"><b>${esc(i.card_name)}</b><div class="hint">${esc(i.set_name)} #${esc(i.local_id)} · ${esc(i.variant_label || "")} · ${esc(i.condition)}</div>
+        <div class="hint">${gbp(i.price)} + ${i.shipping_known ? gbp(i.shipping) : "~" + gbp(i.shipping)} postage · ${esc(i.seller || "")}</div></div>
+      <div class="bside"><b>${gbp(i.total)}</b><a class="btn small" href="${esc(i.url)}" target="_blank" rel="noopener">eBay</a>
+        <button class="linkbtn" data-unbasket="${esc(i.listing_id)}">remove</button></div>
+    </div>`).join("");
+  showPicture("", `🧺 Basket (${items.length})`, `
+    ${rows || `<p class="hint">Empty. Tap 🧺 on any listing to add it.</p>`}
+    ${items.length ? `<div class="totals">
+      <div><span>Cards</span><b>${gbp(cards)}</b></div>
+      <div><span>Postage</span><b>${gbp(post)}</b></div>
+      <div class="grand"><span>Total</span><b>${gbp(cards + post)}</b></div>
+      ${fair ? `<div><span>Fair value</span><b>${gbp(fair)}</b></div><div class="save"><span>You'd save</span><b>${gbp(fair - cards - post)}</b></div>` : ""}
+    </div>
+    ${shared.length ? `<p class="hint">💡 ${shared.map(([s, n]) => `${n} items from ${esc(s)}`).join(", ")}: ask about combined postage.</p>` : ""}
+    <div class="actions end"><button class="btn ghost small" data-basket="empty">Empty basket</button>
+      <button class="btn primary" data-basket="bought">We bought these ✓</button></div>` : ""}`);
+  $("#card-dialog").onclick = async (e) => {
+    if (e.target.id === "card-dialog") { e.target.close(); return; }
+    const un = e.target.closest("[data-unbasket]");
+    if (un) { await basketRemove(un.dataset.unbasket); showBasket(); renderDeals(); return; }
+    const act = e.target.closest("[data-basket]");
+    if (!act) return;
+    if (act.dataset.basket === "empty") {
+      const { items: left } = await api("/api/basket/all", undefined, "DELETE");
+      setBasket(left);
+      toast("Basket emptied");
+    } else {
+      await api("/api/basket/bought", {});
+      setBasket([]);
+      state.items = [];
+      toast("Ticked off in your collection 🎉");
+      loadStatus();
+      loadDeals();
+    }
+    $("#card-dialog").close();
+    renderDeals();
+  };
+}
+
+// ---------------------------------------------------------------- fake reports
+const FAKE_REASONS = ["Gold / metal / foil card", "Wrong font or blurry print", "Sticker, skin or print", "Fan art / custom / proxy", "Not English", "Wrong card", "Too cheap to be real"];
+function reportFake(listingId, name) {
+  showPicture("", `🚩 Mark ${name} as fake`, `
+    <p class="hint">What gave it away? This teaches the bot: the seller gets blocked, telltale title words and
+      price levels are learned, and the photo check is told what to look for.</p>
+    <div class="chips multi" id="fake-reasons">${FAKE_REASONS.map((r) => `<button>${esc(r)}</button>`).join("")}</div>
+    <p><input id="fake-note" type="text" placeholder="Anything else? (optional)" style="width:100%"></p>
+    <div class="actions end"><button class="btn ghost" data-fake="cancel">Cancel</button><button class="btn primary" data-fake="send">Mark as fake</button></div>`);
+  $("#card-dialog").onclick = async (e) => {
+    if (e.target.id === "card-dialog") return e.target.close();
+    const chip = e.target.closest("#fake-reasons button");
+    if (chip) return chip.classList.toggle("on");
+    const b = e.target.closest("[data-fake]");
+    if (!b) return;
+    if (b.dataset.fake === "send") {
+      const reason = [...$$("#fake-reasons button.on").map((x) => x.textContent), $("#fake-note").value.trim()].filter(Boolean).join("; ");
+      const learned = await api(`/api/listings/${encodeURIComponent(listingId)}/fake`, { reason });
+      state.basket.delete(listingId);
+      toast(`Thanks! Blocking ${learned.sellers.length} seller${learned.sellers.length === 1 ? "" : "s"} and learning from ${learned.reports.length} report${learned.reports.length === 1 ? "" : "s"} 🧠`);
+      loadDeals();
+      loadBasket();
+    }
+    $("#card-dialog").close();
+  };
+}
+async function loadLearning() {
+  renderLearning(await api("/api/learning"));
+}
+function renderLearning(l) {
+  const reports = l.reports.map((r) => `
+    <div class="brow">
+      ${picture(r.image ? [r.image] : [], "", "bthumb")}
+      <div class="bmain"><b>${esc(r.card_name || r.title)}</b><div class="hint">${esc(r.reason)}</div>
+        <div class="hint">${gbp(r.total)} · ${esc(r.seller || "?")} · ${ago(r.created_at)}</div></div>
+      <div class="bside"><button class="btn small ghost" data-undo="${r.id}">Undo</button></div>
+    </div>`).join("");
+  $("#learned").innerHTML = l.reports.length ? `
+    <p class="hint">${l.reports.length} fake${l.reports.length === 1 ? "" : "s"} reported. The bot now:</p>
+    <div class="frow"><span class="flabel">Blocks sellers</span><div class="chips">${l.sellers.map((s) => `<span class="badge bad">${esc(s)}</span>`).join("") || `<span class="hint">none</span>`}</div></div>
+    <div class="frow"><span class="flabel">Blocks words</span><div class="chips">${l.words.map((w) => `<button data-ignore="${esc(w)}" title="Stop blocking this word">${esc(w)} ✕</button>`).join("") || `<span class="hint">none yet (needs 2+ reports sharing a word)</span>`}</div></div>
+    ${l.ignored_words.length ? `<div class="frow"><span class="flabel">Allowed words</span><div class="chips">${l.ignored_words.map((w) => `<button data-restore="${esc(w)}" title="Block again">${esc(w)} ↺</button>`).join("")}</div></div>` : ""}
+    <h3 class="pick-h">Reports</h3>${reports}`
+    : `<p class="hint">Nothing yet. Tap 🚩 on any listing that turns out to be fake and the bot will learn from it.</p>`;
+}
+$("#learned").addEventListener("click", async (e) => {
+  const undo = e.target.closest("[data-undo]");
+  const ignore = e.target.closest("[data-ignore]");
+  const restore = e.target.closest("[data-restore]");
+  if (undo) renderLearning(await api(`/api/learning/undo/${undo.dataset.undo}`, {}));
+  if (ignore) renderLearning(await api("/api/learning/ignore-word", { word: ignore.dataset.ignore }));
+  if (restore) renderLearning(await api("/api/learning/ignore-word", { word: restore.dataset.restore, restore: true }));
+  if (undo || ignore || restore) toast("Updated");
 });
 
 // pick a different picture for a card
@@ -592,4 +787,5 @@ syncFilterInputs();
 $("#filter-count").textContent = activeFilterCount() || "";
 showTab(store("tab", "deals"));
 refresh();
+loadBasket();
 setInterval(refresh, 60_000);

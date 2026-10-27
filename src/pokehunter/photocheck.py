@@ -113,15 +113,20 @@ class PhotoChecker:
             },
         }
 
-    async def check(self, claimed: str, title: str, image_urls: list[str]) -> PhotoVerdict:
+    async def check(
+        self, claimed: str, title: str, image_urls: list[str], examples: list[str] | None = None
+    ) -> PhotoVerdict:
         images = [img for url in image_urls[:3] if (img := await self._download(url))]
         if not images:
             return PhotoVerdict("unsure", "No photos could be loaded")
-        prompt = (
-            f"The listing claims to be: {claimed}\n"
-            f"Listing title: {title}\n"
-            "Look at the photos above and give your verdict."
-        )
+        prompt = f"The listing claims to be: {claimed}\nListing title: {title}\n"
+        if examples:
+            reasons = "\n".join(f"- {r}" for r in dict.fromkeys(examples[-8:]))
+            prompt += (
+                "The family has previously reported fakes of this card. What they noticed:\n"
+                f"{reasons}\n"
+            )
+        prompt += "Look at the photos above and give your verdict."
         try:
             message = await self.client().beta.messages.create(
                 model=self.settings.photo_check_model,

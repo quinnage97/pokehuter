@@ -111,6 +111,7 @@
           <label class="tog"><input type="checkbox" id="c-star"> ⭐ Starred only</label>
           <label class="tog"><input type="checkbox" id="c-stamped" checked> Include stamped promos</label>
           <label class="tog"><input type="checkbox" id="c-hidden"> Show skipped</label>
+          <button id="pick-mode" class="btn small">🧮 Price up cards</button>
           <button id="add-card" class="btn ghost small">＋ Add a missing card</button>
         </div>
       </div>
@@ -161,6 +162,12 @@
         </div>
 
         <div class="panel">
+          <h2>🧠 What the bot has learned</h2>
+          <label class="row tog"><input name="block_reported_sellers" type="checkbox"> Block sellers I've reported for fakes</label>
+          <div id="learned"></div>
+        </div>
+
+        <div class="panel">
           <h2>🔔 Alerts &amp; searching</h2>
           <label class="row tog"><input name="alerts_enabled" type="checkbox"> Send Telegram alerts</label>
           <label class="row">Max alerts per scan <input name="max_alerts_per_scan" type="number" min="1"></label>
@@ -207,6 +214,8 @@
       </div>
     </form>
   </dialog>
+  <div id="pick-bar" class="floatbar" hidden></div>
+  <button id="basket-bar" class="floatbar basket" hidden></button>
   <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js"></script>
 </body>
