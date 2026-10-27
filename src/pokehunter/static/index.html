@@ -54,6 +54,8 @@
         <label>Accept MP/HP (played) copies for cards worth over £<input name="played_ok_above_gbp" type="number" min="0"></label>
         <label><input name="allow_damaged" type="checkbox"> Accept damaged copies</label>
         <label>Ignore sellers with fewer than <input name="min_seller_feedback" type="number" min="0"> feedback</label>
+        <label>…and for cards worth over £<input name="trusted_seller_above_gbp" type="number" min="0">, fewer than <input name="trusted_seller_feedback" type="number" min="0"> feedback</label>
+        <label><input name="uk_sellers_only" type="checkbox"> UK sellers only (fewer fakes, no import fees)</label>
         <label><input name="alerts_enabled" type="checkbox"> Send Telegram alerts</label>
         <label>Max alerts per scan <input name="max_alerts_per_scan" type="number" min="1"></label>
         <label>Cards searched individually per scan <input name="targeted_per_scan" type="number" min="0" max="100"></label>

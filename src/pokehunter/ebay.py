@@ -81,7 +81,7 @@ class EbayClient:
         return self._token
 
     async def search(
-        self, query: str, *, sort: str | None = None, limit: int = 200
+        self, query: str, *, sort: str | None = None, limit: int = 200, uk_only: bool = False
     ) -> list[Listing]:
         if self.db.calls_today() >= self.settings.ebay_daily_call_budget:
             raise BudgetExhausted("daily eBay call budget used up; resuming tomorrow")
@@ -110,6 +110,8 @@ class EbayClient:
             ),
             "limit": str(limit),
         }
+        if uk_only:
+            params["filter"] += f",itemLocationCountry:{self.settings.ebay_delivery_country}"
         if sort:
             params["sort"] = sort
         self.db.count_call()

@@ -115,6 +115,8 @@ def test_evaluate_rules():
         "played_ok_above_gbp": 15,
         "allow_damaged": False,
         "min_seller_feedback": 5,
+        "trusted_seller_above_gbp": 30,
+        "trusted_seller_feedback": 50,
         "suspicious_above_pct": 50,
     }
     item = {"market_gbp": 100.0, "target_price": None, "priority": 0}
@@ -140,6 +142,8 @@ def test_ebay_prices_override_a_bad_price_guide():
         "played_ok_above_gbp": 15,
         "allow_damaged": False,
         "min_seller_feedback": 5,
+        "trusted_seller_above_gbp": 30,
+        "trusted_seller_feedback": 50,
         "suspicious_above_pct": 50,
     }
     item = {"market_gbp": 173.4, "ebay_median_gbp": 18.0, "target_price": None, "priority": 0}
@@ -156,6 +160,8 @@ def test_fakes_far_below_ebay_prices_are_ignored():
         "played_ok_above_gbp": 15,
         "allow_damaged": False,
         "min_seller_feedback": 5,
+        "trusted_seller_above_gbp": 30,
+        "trusted_seller_feedback": 50,
         "suspicious_above_pct": 50,
     }
     # Delta Charizard: genuine copies around £400 on eBay, a "deal" at £100 is a fake.
@@ -227,3 +233,29 @@ def test_alert_text_without_price_guide():
     }
     text = format_deal(deal, None)
     assert "£10.00 alert price" in text and "not enough listings" in text
+
+
+def test_valuable_cards_need_established_seller():
+    from pokehunter.db import DEFAULT_PREFS
+
+    # Charizard V 79/73 gold fake: seller with 25 feedback.
+    item = {"market_gbp": 120.0, "ebay_median_gbp": 110.0, "target_price": None, "priority": 0}
+    seller = {"username": "new", "feedbackScore": 25}
+    listing = parse_item(ebay_item("v", "t", "70.00", shipping="0", seller=seller), "GBP")
+    assert not evaluate(listing, "LP", item, DEFAULT_PREFS).is_deal
+    trusted = parse_item(ebay_item("w", "t", "70.00", shipping="0"), "GBP")  # 250 feedback
+    assert evaluate(trusted, "LP", item, DEFAULT_PREFS).is_deal
+
+
+def test_uk_only_filter_sent_to_ebay(catalog_db, settings):
+    fake = FakeEbay()
+    urls = []
+    original = fake.__call__
+
+    def spy(request):
+        urls.append(str(request.url))
+        return original(request)
+
+    run_scan(catalog_db, settings, spy)
+    searches = [u for u in urls if "item_summary" in u]
+    assert searches and all("itemLocationCountry%3AGB" in u for u in searches)

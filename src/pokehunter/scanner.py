@@ -46,9 +46,11 @@ def evaluate(
         condition_ok = value >= prefs["played_ok_above_gbp"]
     else:
         condition_ok = True
-    seller_ok = (
-        listing.feedback_score is None or listing.feedback_score >= prefs["min_seller_feedback"]
-    )
+    # Valuable cards need an established seller: new accounts are where most fakes come from.
+    needed = prefs["min_seller_feedback"]
+    if (base or target or 0) >= prefs["trusted_seller_above_gbp"]:
+        needed = max(needed, prefs["trusted_seller_feedback"])
+    seller_ok = listing.feedback_score is None or listing.feedback_score >= needed
     priority = item.get("priority")
     threshold = prefs["priority_discount_pct" if priority else "min_discount_pct"]
     by_market = (
@@ -131,7 +133,9 @@ class Scanner:
             if stats.get("stop"):
                 return
             try:
-                results = await self.ebay.search(query, sort=sort, limit=limit)
+                results = await self.ebay.search(
+                    query, sort=sort, limit=limit, uk_only=self.db.prefs()["uk_sellers_only"]
+                )
             except BudgetExhausted as exc:
                 errors.append(str(exc))
                 stats["stop"] = True

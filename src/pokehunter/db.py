@@ -97,6 +97,9 @@ DEFAULT_PREFS: dict[str, Any] = {
     "played_ok_above_gbp": 15,  # MP/HP copies are only considered for cards worth this much
     "allow_damaged": False,
     "min_seller_feedback": 5,
+    "trusted_seller_above_gbp": 30,  # cards worth this much...
+    "trusted_seller_feedback": 50,  # ...need a seller with at least this much feedback
+    "uk_sellers_only": True,
     "alerts_enabled": True,
     "max_alerts_per_scan": 10,
     "targeted_per_scan": 30,
