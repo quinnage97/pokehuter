@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 CONDITION_FACTOR = {"NM": 1.0, "LP": 0.85, "MP": 0.7, "HP": 0.55, "DMG": 0.4, "?": 0.8}
 CONDITION_LABEL = {
@@ -64,7 +65,10 @@ _NON_ENGLISH = re.compile(
     r"\b(japanese|japan|jpn|jp|korean|kor|chinese|s-chinese|t-chinese|german|deutsch|french"
     r"|fran[cç]ais|italian|italiano|spanish|espa[nñ]ol|portuguese|dutch|thai|indonesian"
     r"|ita|ger|deu|fra|fr|esp|spa|por|kr|cn|chn|jap|sc|tc|tarjetas?|cartas?|carte|karten?"
-    r"|espa[nñ]a|versione|vf)\b",
+    r"|espa[nñ]a|versione|vf|polish|polski|russian|portugu[eê]s|simplified|traditional"
+    r"|asian|asia|ver\.? ?(?:jp|kr|cn))\b"
+    # Japanese, Chinese, Korean, Thai or Cyrillic writing in the title.
+    r"|[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0e00-\u0e7f\u0400-\u04ff]",
     re.I,
 )
 _FIRST_ED = re.compile(r"\b(1st|first)[\s-]*ed(ition|\.)?\b", re.I)
@@ -75,6 +79,7 @@ _FRACTION = re.compile(
 _SET_STOPWORDS = {"set", "the", "and", "promos", "promo", "black", "star", "pokemon", "collection"}
 
 
+@lru_cache(maxsize=4096)
 def norm_number(value: str) -> str:
     """'004' -> '4', 'TG03' -> 'tg3', 'SWSH050' -> 'swsh50'."""
     m = re.fullmatch(r"([a-z]*)0*(\d+)([a-z]?)", value.strip().lower())
@@ -103,10 +108,11 @@ _FORMS = [
 _FORMS = [(form, re.compile(rx, re.I)) for form, rx in _FORMS]
 
 
-def card_forms(text: str) -> set[str]:
+@lru_cache(maxsize=2048)
+def card_forms(text: str) -> frozenset[str]:
     """Which special form a name or title mentions: Mega, GX, V, VMAX, Dark, Shining..."""
     text = re.sub(r"\bv[\s-]+(max|star)\b", r"v\1", text, flags=re.I)
-    return {form for form, pattern in _FORMS if pattern.search(text)}
+    return frozenset(form for form, pattern in _FORMS if pattern.search(text))
 
 
 def word_match(name: str, text: str) -> bool:
@@ -194,28 +200,37 @@ def match_title(title: str, cards: list[CardRef]) -> tuple[Match | None, str]:
     tokens = _title_tokens(title)
     has_promo_word = "promo" in title.lower()
 
+    title_forms = card_forms(title)
+    mewtwo_in_title = word_match("mewtwo", title)
+    names_pokemon: dict[str, bool] = {}
     candidates: list[CardRef] = []
     for card in cards:
-        if not word_match(card.pokemon, title):
-            continue
-        # "Mew" listings must not be Mewtwo cards (unless the card itself names Mewtwo).
-        if word_match("mewtwo", title) and not word_match("mewtwo", card.name):
-            continue
-        # A title naming a form the card isn't (e.g. "Mega Charizard X ex" with the number of
-        # the plain "Charizard EX" promo) is a different card.
-        if card_forms(title) - card_forms(card.name):
-            continue
+        # The card number is the cheap test, so it goes first.
         number = norm_number(card.local_id)
         if fractions:
             num, den = next(iter(fractions))
-            if num == number and card.set_official and den == card.set_official:
-                candidates.append(card)
+            if not (num == number and card.set_official and den == card.set_official):
+                continue
         elif card.is_promo:
             if number.isdigit():
-                if has_promo_word and re.search(rf"#\s*0*{number}\b|\b0*{number}\b", title):
-                    candidates.append(card)
-            elif number in tokens:
-                candidates.append(card)
+                if not (has_promo_word and re.search(rf"#\s*0*{number}\b|\b0*{number}\b", title)):
+                    continue
+            elif number not in tokens:
+                continue
+        else:
+            continue
+        if card.pokemon not in names_pokemon:
+            names_pokemon[card.pokemon] = word_match(card.pokemon, title)
+        if not names_pokemon[card.pokemon]:
+            continue
+        # "Mew" listings must not be Mewtwo cards (unless the card itself names Mewtwo).
+        if mewtwo_in_title and not word_match("mewtwo", card.name):
+            continue
+        # A title naming a form the card isn't (e.g. "Mega Charizard X ex" with the number of
+        # the plain "Charizard EX" promo) is a different card.
+        if title_forms - card_forms(card.name):
+            continue
+        candidates.append(card)
     # Celebrations "Classic Collection" reprints carry the original numbers (e.g. 4/102), so
     # never value them as the far pricier originals.
     if re.search(r"celebration|classic collection", title, re.I):

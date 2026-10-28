@@ -51,6 +51,7 @@ class EbayClient:
         self.db = db
         self._token: str | None = None
         self._token_expiry = 0.0
+        self._aspect_filter_rejected = False
 
     async def _access_token(self) -> str:
         if self._token and time.monotonic() < self._token_expiry - 120:
@@ -82,7 +83,13 @@ class EbayClient:
         return self._token
 
     async def search(
-        self, query: str, *, sort: str | None = None, limit: int = 200, uk_only: bool = False
+        self,
+        query: str,
+        *,
+        sort: str | None = None,
+        limit: int = 200,
+        uk_only: bool = False,
+        english_only: bool = False,
     ) -> list[Listing]:
         if self.db.calls_today() >= self.settings.ebay_daily_call_budget:
             raise BudgetExhausted("daily eBay call budget used up; resuming tomorrow")
@@ -115,10 +122,26 @@ class EbayClient:
             params["filter"] += f",itemLocationCountry:{self.settings.ebay_delivery_country}"
         if sort:
             params["sort"] = sort
+        if english_only and not self._aspect_filter_rejected:
+            # Only listings whose seller set the card language to English.
+            params["aspect_filter"] = (
+                f"categoryId:{self.settings.ebay_category_id},Language:{{English}}"
+            )
         self.db.count_call()
         response = await self.http.get(
             f"{API}/buy/browse/v1/item_summary/search", headers=headers, params=params, timeout=30
         )
+        if response.status_code == 400 and "aspect_filter" in params:
+            # eBay refused the language filter: carry on with title checks alone.
+            self._aspect_filter_rejected = True
+            params.pop("aspect_filter")
+            self.db.count_call()
+            response = await self.http.get(
+                f"{API}/buy/browse/v1/item_summary/search",
+                headers=headers,
+                params=params,
+                timeout=30,
+            )
         if response.status_code == 401:
             self._token = None
         if response.is_error:

@@ -337,3 +337,26 @@ def test_cheap_photo_model_choice(catalog_db, settings):
     run_scan_with_photos(catalog_db, settings, FakeEbay(), photos)
     assert photos.models == ["claude-haiku-5-5"]
     assert catalog_db.get_kv(f"photo_checks:{__import__('pokehunter.db').db.now_iso()[:10]}") == 1
+
+
+def test_english_only_filter_and_fallback(catalog_db, settings):
+    urls = []
+
+    def ebay(request):
+        url = str(request.url)
+        if "oauth2/token" in url:
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 7200})
+        urls.append(url)
+        if "aspect_filter" in url:
+            return httpx.Response(400, json={"errors": [{"message": "bad aspect"}]})
+        return httpx.Response(200, json={"itemSummaries": []})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(ebay)) as http:
+            client = EbayClient(settings, http, catalog_db)
+            await client.search("Charizard", english_only=True)
+            await client.search("Mew", english_only=True)
+
+    asyncio.run(go())
+    assert "Language%3A%7BEnglish%7D" in urls[0]
+    assert "aspect_filter" not in urls[1] and "aspect_filter" not in urls[2]

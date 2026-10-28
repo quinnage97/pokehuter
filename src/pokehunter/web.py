@@ -83,7 +83,7 @@ class Engine:
         with contextlib.suppress(Exception):
             reprice(self.db)
         try:
-            self.scanner.refresh_flags()
+            await asyncio.to_thread(self.scanner.refresh_flags)
         except Exception:  # noqa: BLE001
             log.exception("start-up recheck failed")
         while True:
@@ -378,7 +378,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             raise HTTPException(404, "Unknown listing") from exc
         with e.db.tx() as c:
             c.execute("DELETE FROM basket WHERE listing_id = ?", (listing_id,))
-        e.scanner.refresh_flags()
+        await asyncio.to_thread(e.scanner.refresh_flags)
         return {"id": report_id, **summary(e.db, e.scanner.signals)}
 
     @app.get("/api/learning")
@@ -394,7 +394,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             undo_fake(e.db, report_id)
         except KeyError as exc:
             raise HTTPException(404, "Unknown report") from exc
-        e.scanner.refresh_flags()
+        await asyncio.to_thread(e.scanner.refresh_flags)
         return summary(e.db, e.scanner.signals)
 
     @app.post("/api/learning/ignore-word")
@@ -407,7 +407,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
         elif word:
             ignored.add(word)
         e.db.set_kv("ignored_fake_words", sorted(ignored))
-        e.scanner.refresh_flags()
+        await asyncio.to_thread(e.scanner.refresh_flags)
         return summary(e.db, e.scanner.signals)
 
     def basket_rows(e: Engine) -> list[dict[str, Any]]:

@@ -127,6 +127,7 @@ DEFAULT_PREFS: dict[str, Any] = {
     "trusted_seller_above_gbp": 30,  # cards worth this much...
     "trusted_seller_feedback": 50,  # ...need a seller with at least this much feedback
     "uk_sellers_only": True,
+    "english_only": True,  # only listings eBay has marked as English cards
     "photo_check_enabled": True,
     "photo_checks_per_day": 20,  # caps what the photo check can cost in a day
     "photo_check_model": "best",  # "best" (Opus) or "cheap" (Haiku)

@@ -159,8 +159,13 @@ class Scanner:
             if stats.get("stop"):
                 return
             try:
+                prefs = self.db.prefs()
                 results = await self.ebay.search(
-                    query, sort=sort, limit=limit, uk_only=self.db.prefs()["uk_sellers_only"]
+                    query,
+                    sort=sort,
+                    limit=limit,
+                    uk_only=prefs["uk_sellers_only"],
+                    english_only=prefs["english_only"],
                 )
             except BudgetExhausted as exc:
                 errors.append(str(exc))

@@ -26,13 +26,31 @@ function store(key, fallback, value) {
     return localStorage.getItem("ph." + key) ?? fallback;
   } catch { return fallback; }
 }
+// Loading feedback: while anything is being saved, a bar runs under the header and the
+// button that was tapped shows a spinning wheel, so nothing looks frozen.
+let lastButton = null;
+let pending = 0;
+document.addEventListener("click", (e) => { lastButton = e.target.closest("button, .btn"); }, true);
+function setLoading(on) {
+  pending += on ? 1 : -1;
+  $("#loadbar").hidden = pending <= 0;
+}
 async function api(path, body, method) {
   const opts = body === undefined && !method ? {} : {
     method: method || "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
   };
-  const res = await fetch(path, opts);
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
-  return res.json();
+  const writing = !!opts.method;
+  const button = writing && lastButton && document.contains(lastButton) ? lastButton : null;
+  if (writing) setLoading(true);
+  button?.classList.add("loading");
+  try {
+    const res = await fetch(path, opts);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    return await res.json();
+  } finally {
+    if (writing) setLoading(false);
+    button?.classList.remove("loading");
+  }
 }
 function toast(msg, undo) {
   const t = $("#toast");
@@ -709,6 +727,8 @@ function reportFake(listingId, name) {
         return loadDeals();
       }
       const reason = [...chosen, $("#fake-note").value.trim()].filter(Boolean).join("; ");
+      b.textContent = "Learning…";
+      $$("#card-dialog button").forEach((x) => (x.disabled = true));
       const learned = await api(`/api/listings/${encodeURIComponent(listingId)}/fake`, { reason });
       state.basket.delete(listingId);
       toast(`Thanks! Blocking ${learned.sellers.length} seller${learned.sellers.length === 1 ? "" : "s"} and learning from ${learned.reports.length} report${learned.reports.length === 1 ? "" : "s"} 🧠`);

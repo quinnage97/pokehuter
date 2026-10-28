@@ -26,6 +26,7 @@
     </nav>
   </header>
 
+  <div id="loadbar" class="loadbar" hidden><span></span></div>
   <main>
     <!-- DEALS -->
     <section id="tab-deals">
@@ -166,6 +167,7 @@
           </div>
           <label class="row">Ignore anything more than <input name="suspicious_above_pct" type="number" min="0" max="100">% under (almost always fake)</label>
           <label class="row tog"><input name="uk_sellers_only" type="checkbox"> UK sellers only</label>
+          <label class="row tog"><input name="english_only" type="checkbox"> English cards only (uses the language the seller set on eBay)</label>
           <label class="row">Ignore sellers with fewer than <input name="min_seller_feedback" type="number" min="0"> feedback</label>
           <label class="row">…and for cards worth over £<input name="trusted_seller_above_gbp" type="number" min="0">, fewer than <input name="trusted_seller_feedback" type="number" min="0"></label>
         </div>
