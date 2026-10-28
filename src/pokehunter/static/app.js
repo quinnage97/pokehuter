@@ -207,7 +207,7 @@ function renderPokeChips() {
 }
 function activeFilterCount() {
   const f = state.f;
-  return ["q", "max", "min", "disc", "fb"].filter((k) => f[k]).length + (f.poke !== "All") + f.cond.length + f.vars.length +
+  return ["q"].filter((k) => f[k]).length + ["max", "min", "disc", "fb"].filter((k) => amount(f[k]) != null).length + (f.poke !== "All") + f.cond.length + f.vars.length +
     ["star", "photo", "verified", "post"].filter((k) => f[k]).length;
 }
 // Filters apply as soon as you change them; "Save filters" keeps them on the server so they
@@ -245,8 +245,14 @@ $("#scope").addEventListener("click", (e) => {
   syncFilterInputs();
   loadDeals();
 });
+// Text boxes with a number keypad (iPhone "number" boxes go blank on "£" or a comma, which
+// silently switched the filter off). Every keyboard event updates the filter.
 [["#f-search", "q"], ["#f-sort", "sort"], ["#f-max", "max"], ["#f-min", "min"], ["#f-disc", "disc"], ["#f-fb", "fb"]].forEach(([sel, key]) =>
-  $(sel).addEventListener("input", (e) => { state.f[key] = e.target.value; saveFilters(); }));
+  ["input", "change", "keyup"].forEach((type) => $(sel).addEventListener(type, (e) => {
+    if (state.f[key] === e.target.value) return;
+    state.f[key] = e.target.value;
+    saveFilters();
+  })));
 [["#f-star", "star"], ["#f-photo", "photo"], ["#f-verified", "verified"], ["#f-post", "post"], ["#f-alerts", "alerts"]].forEach(([sel, key]) =>
   $(sel).addEventListener("change", (e) => { state.f[key] = e.target.checked; saveFilters(); }));
 $("#f-poke").addEventListener("click", (e) => {
@@ -271,6 +277,18 @@ $("#f-reset").addEventListener("click", () => {
   saveFilters();
 });
 
+// "£20", "20.50", "20,50" and " 20 " all mean 20 / 20.5; anything else means "no limit".
+function amount(value) {
+  if (value === "" || value == null) return null;
+  const n = parseFloat(String(value).replace(/[£\s]/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+function priceRange() {
+  const min = amount(state.f.min), max = amount(state.f.max);
+  if (min == null && max == null) return "";
+  if (min != null && max != null) return ` · £${min}–£${max}`;
+  return min != null ? ` · £${min} and up` : ` · up to £${max}`;
+}
 function passes(d) {
   const f = state.f;
   const q = f.q.trim().toLowerCase();
@@ -282,10 +300,11 @@ function passes(d) {
     const stamped = d.variant.includes(":");
     if (!(f.vars.includes(base) && !stamped) && !(stamped && f.vars.includes("stamped"))) return false;
   }
-  if (f.max !== "" && d.total > Number(f.max)) return false;
-  if (f.min !== "" && d.total < Number(f.min)) return false;
-  if (f.disc !== "" && !((d.discount_pct ?? -1) >= Number(f.disc))) return false;
-  if (f.fb !== "" && (d.feedback_score ?? 0) < Number(f.fb)) return false;
+  const max = amount(f.max), min = amount(f.min), disc = amount(f.disc), fb = amount(f.fb);
+  if (max != null && d.total > max) return false;
+  if (min != null && d.total < min) return false;
+  if (disc != null && !((d.discount_pct ?? -1) >= disc)) return false;
+  if (fb != null && (d.feedback_score ?? 0) < fb) return false;
   if (f.star && !d.priority) return false;
   if (f.photo && d.photo_verdict !== "genuine") return false;
   if (f.verified && !d.ebay_median_gbp) return false;
@@ -306,7 +325,7 @@ function renderDeals() {
   if (state.scope === "deals") $("#deal-count").textContent = shown.length || "";
   const what = state.scope === "deals" ? "deals" : "listings";
   $("#result-line").textContent = state.listings.length
-    ? `Showing ${shown.length} of ${state.listings.length} ${what}` + (activeFilterCount() ? " (filtered)" : "")
+    ? `Showing ${shown.length} of ${state.listings.length} ${what}` + priceRange() + (activeFilterCount() ? " (filtered)" : "")
     : "";
   if (!shown.length) {
     $("#deals").innerHTML = state.listings.length
@@ -348,7 +367,7 @@ function dealCard(d) {
       <div class="title">${esc(d.title)}</div>
       ${d.photo_reason && photo ? `<div class="hint">📷 ${esc(d.photo_reason)}</div>` : ""}
       ${d.warning ? `<div class="warns">⚠️ ${esc(d.warning)}</div>` : ""}
-      <div class="meta" style="margin-top:6px">Seller ${esc(d.seller || "?")} (${d.feedback_score ?? "?"} feedback) · seen ${ago(d.last_seen)}</div>
+      <div class="meta" style="margin-top:6px">Seller ${esc(d.seller || "?")} (${d.feedback_score ?? "?"} feedback) · ${d.checked_at && d.checked_at > d.last_seen ? `still for sale ${ago(d.checked_at)}` : `seen ${ago(d.last_seen)}`}</div>
     </div>
     <div class="bar">
       <a class="btn primary" href="${esc(d.url)}" target="_blank" rel="noopener">Open on eBay</a>
@@ -646,7 +665,7 @@ function setBasket(items) {
   bar.hidden = !items.length;
   if (state.listings.length) renderDeals();
   if (!items.length) return;
-  const total = items.reduce((s, i) => s + i.total, 0);
+  const total = items.filter((i) => !i.sold).reduce((s, i) => s + i.total, 0);
   bar.innerHTML = `<span>🧺 <b>${items.length}</b> in basket · <b>${gbp(total)}</b></span><button class="btn primary small">View</button>`;
 }
 async function basketAdd(ids) {
@@ -660,22 +679,25 @@ async function basketRemove(id) {
 }
 $("#basket-bar").addEventListener("click", () => showBasket());
 function showBasket() {
-  const items = [...state.basket.values()];
+  const all = [...state.basket.values()];
+  const items = all.filter((i) => !i.sold);
+  const gone = all.filter((i) => i.sold);
   const cards = items.reduce((s, i) => s + i.price, 0);
   const post = items.reduce((s, i) => s + i.shipping, 0);
   const fair = items.reduce((s, i) => s + (i.fair_gbp || 0), 0);
   const bySeller = {};
   items.forEach((i) => (bySeller[i.seller] = (bySeller[i.seller] || 0) + 1));
   const shared = Object.entries(bySeller).filter(([, n]) => n > 1);
-  const rows = items.map((i) => `
+  const rows = all.map((i) => `
     <div class="brow">
       ${picture(i.image ? [i.image] : cardSources(i), i.card_name, "bthumb")}
-      <div class="bmain"><b>${esc(i.card_name)}</b><div class="hint">${esc(i.set_name)} #${esc(i.local_id)} · ${esc(i.variant_label || "")} · ${esc(i.condition)}</div>
+      <div class="bmain"><b>${esc(i.card_name)}</b>${i.sold ? ` <span class="badge bad">Sold / ended</span>` : ""}<div class="hint">${esc(i.set_name)} #${esc(i.local_id)} · ${esc(i.variant_label || "")} · ${esc(i.condition)}</div>
         <div class="hint">${gbp(i.price)} + ${i.shipping_known ? gbp(i.shipping) : "~" + gbp(i.shipping)} postage · ${esc(i.seller || "")}</div></div>
       <div class="bside"><b>${gbp(i.total)}</b><a class="btn small" href="${esc(i.url)}" target="_blank" rel="noopener">eBay</a>
         <button class="linkbtn" data-unbasket="${esc(i.listing_id)}">remove</button></div>
     </div>`).join("");
   showPicture("", `🧺 Basket (${items.length})`, `
+    ${gone.length ? `<p class="hint">⚠️ ${gone.length} item${gone.length === 1 ? " has" : "s have"} sold or ended and ${gone.length === 1 ? "isn't" : "aren't"} counted in the total.</p>` : ""}
     ${rows || `<p class="hint">Empty. Tap 🧺 on any listing to add it.</p>`}
     ${items.length ? `<div class="totals">
       <div><span>Cards</span><b>${gbp(cards)}</b></div>

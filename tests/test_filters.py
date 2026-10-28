@@ -36,6 +36,10 @@ def test_passes_matches_each_filter():
     assert not passes(DEAL, clean({"poke": "Mew"}))
     assert not passes(DEAL, clean({"max": 100}))
     assert not passes(DEAL, clean({"min": 200}))
+    assert not passes(DEAL, clean({"max": "£99"}))
+    assert not passes(DEAL, clean({"max": "149,50"}))
+    assert passes(DEAL, clean({"max": " £150 ", "min": "£100"}))
+    assert passes(DEAL, clean({"max": "abc"}))  # nonsense means no limit
     assert not passes(DEAL, clean({"disc": 50}))
     assert not passes(DEAL, clean({"vars": ["reverse"]}))
     assert passes({**DEAL, "variant": "holo:set-logo"}, clean({"vars": ["stamped"]}))

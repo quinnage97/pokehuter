@@ -360,3 +360,52 @@ def test_english_only_filter_and_fallback(catalog_db, settings):
     asyncio.run(go())
     assert "Language%3A%7BEnglish%7D" in urls[0]
     assert "aspect_filter" not in urls[1] and "aspect_filter" not in urls[2]
+
+
+def test_sold_listings_are_removed(catalog_db, settings):
+    _, scanner = run_scan(catalog_db, settings, FakeEbay())
+    assert [d["listing_id"] for d in scanner.deals()] == ["1"]
+    with catalog_db.tx() as c:
+        c.execute("INSERT INTO basket (listing_id, added_at) VALUES ('1', 'x')")
+        c.execute("UPDATE listings SET checked_at = '2000-01-01' WHERE item_id = '1'")  # an hour on
+
+    class GoneEbay(FakeEbay):
+        """Listing 1 has sold: it's no longer in searches and eBay says it's out of stock."""
+
+        def __call__(self, request):
+            url = str(request.url)
+            if "item_summary/search" in url:
+                self.searches.append(request.url.params["q"])
+                return httpx.Response(
+                    200, json={"itemSummaries": [i for i in LISTINGS if i["itemId"] != "1"]}
+                )
+            if "/buy/browse/v1/item/" in url:
+                self.checked = [*getattr(self, "checked", []), url.rsplit("/", 1)[1]]
+                return httpx.Response(
+                    200,
+                    json={
+                        "estimatedAvailabilities": [{"estimatedAvailabilityStatus": "OUT_OF_STOCK"}]
+                    },
+                )
+            return super().__call__(request)
+
+    fake = GoneEbay()
+    _, scanner = run_scan(catalog_db, settings, fake)
+    assert fake.checked == ["1"]
+    assert scanner.deals() == []
+    row = catalog_db.one("SELECT sold, is_deal FROM listings WHERE item_id='1'")
+    assert row["sold"] == 1 and row["is_deal"] == 0
+    # Still recorded as sold on later scans, not resurrected as a deal.
+    run_scan(catalog_db, settings, FakeEbay())
+    assert catalog_db.one("SELECT sold FROM listings WHERE item_id='1'")["sold"] == 1
+
+
+def test_listings_seen_in_search_are_not_rechecked(catalog_db, settings):
+    class CountingEbay(FakeEbay):
+        def __call__(self, request):
+            if "/buy/browse/v1/item/" in str(request.url):
+                raise AssertionError("should not look up a listing it just saw")
+            return super().__call__(request)
+
+    run_scan(catalog_db, settings, CountingEbay())
+    run_scan(catalog_db, settings, CountingEbay())

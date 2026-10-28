@@ -27,9 +27,13 @@ SORTS = {"best", "saving", "cheap", "dear", "new", "old"}
 
 
 def _number(value: Any) -> float | None:
+    """'£20', '20.50', '20,50' and ' 20 ' are all numbers; anything else means no limit."""
+    if value in ("", None):
+        return None
+    text = str(value).replace("£", "").replace(",", ".").strip()
     try:
-        return None if value in ("", None) else float(value)
-    except (TypeError, ValueError):
+        return float(text)
+    except ValueError:
         return None
 
 

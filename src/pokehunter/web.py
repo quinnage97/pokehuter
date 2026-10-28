@@ -214,7 +214,8 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             LEFT JOIN (
                 SELECT match_item_id, item_id AS listing_id, MIN(total) AS total, condition
                 FROM listings
-                WHERE dismissed = 0 AND last_seen >= :cutoff AND user_verdict IS NULL
+                WHERE dismissed = 0 AND sold = 0 AND last_seen >= :cutoff
+                  AND user_verdict IS NULL
                   AND COALESCE(photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')
                   AND COALESCE(warning, '') NOT LIKE '%Likely fake%'
                 GROUP BY match_item_id
@@ -416,7 +417,8 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
                 """
                 SELECT b.added_at, l.item_id AS listing_id, l.title, l.url, l.image, l.price,
                        l.shipping, l.shipping_known, l.total, l.condition, l.seller,
-                       l.fair_gbp, l.last_seen, i.id AS match_item_id, i.variant,
+                       l.fair_gbp, l.last_seen, l.sold, l.checked_at, i.id AS match_item_id,
+                       i.variant,
                        c.name AS card_name, c.set_name, c.local_id, c.image AS card_image,
                        c.image_alt, c.custom, c.image_override
                 FROM basket b

@@ -4,6 +4,7 @@ import base64
 import contextlib
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -82,6 +83,12 @@ class EbayClient:
         self._token_expiry = time.monotonic() + int(body.get("expires_in", 7200))
         return self._token
 
+    async def item_status(self, item_id: str) -> str | None:
+        """Is this listing still for sale? 'live', 'gone' or None (unknown)."""
+        if self.db.calls_today() >= self.settings.ebay_daily_call_budget:
+            raise BudgetExhausted("daily eBay call budget used up; resuming tomorrow")
+        return await _item_status(self, item_id)
+
     async def search(
         self,
         query: str,
@@ -154,6 +161,38 @@ class EbayClient:
             for item in response.json().get("itemSummaries") or []
             if (listing := parse_item(item, self.settings.ebay_currency)) is not None
         ]
+
+
+async def _item_status(client: EbayClient, item_id: str) -> str | None:
+    """'live', 'gone' (sold, ended or removed) or None when we couldn't tell."""
+    token = await client._access_token()
+    client.db.count_call()
+    try:
+        response = await client.http.get(
+            f"{API}/buy/browse/v1/item/{quote(item_id, safe='')}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-EBAY-C-MARKETPLACE-ID": client.settings.ebay_marketplace_id,
+                "Accept": "application/json",
+            },
+            timeout=20,
+        )
+    except httpx.HTTPError:
+        return None
+    if response.status_code in (404, 410):
+        return "gone"
+    if response.is_error:
+        return None
+    body = response.json()
+    statuses = {
+        a.get("estimatedAvailabilityStatus") for a in body.get("estimatedAvailabilities") or []
+    }
+    if "OUT_OF_STOCK" in statuses:
+        return "gone"
+    end = body.get("itemEndDate")
+    if end and end < datetime.now(UTC).isoformat():
+        return "gone"
+    return "live"
 
 
 def _float(value: Any) -> float | None:

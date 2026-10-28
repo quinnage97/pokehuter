@@ -18,7 +18,8 @@ from .matching import CONDITION_FACTOR, match_title, variant_label
 from .photocheck import CHEAP_PHOTO_MODEL, REJECT, PhotoChecker
 
 log = logging.getLogger(__name__)
-DEAL_WINDOW_HOURS = 36  # how long a listing stays on the site after we last saw it
+DEAL_WINDOW_HOURS = 18  # how long a listing stays on the site after we last saw it
+AVAILABILITY_CHECKS_PER_SCAN = 10
 
 
 @dataclass
@@ -304,6 +305,11 @@ class Scanner:
         # 4. Judge every recent listing with today's prices and rules.
         self.signals = learn(self.db, block_sellers=prefs["block_reported_sellers"])
         new_deals = self.reevaluate(cards, items, prefs, seen_now)
+        await self.check_availability(seen_now, errors)
+        sold_now = {
+            r["item_id"] for r in self.db.query("SELECT item_id FROM listings WHERE sold = 1")
+        }
+        new_deals = [d for d in new_deals if d["item_id"] not in sold_now]
         new_deals = await self.check_photos(new_deals, prefs)
         alerts = await self._send_alerts(new_deals, prefs, errors)
         deal_count = len(self.deals())
@@ -383,7 +389,9 @@ class Scanner:
             verdict = evaluate(listing, row["condition"], item, prefs)
             photo_ok = row["photo_verdict"] not in REJECT
             learned = self.signals.flag(item_id, row["title"], row["seller"], row["total"])
-            is_deal = bool(match) and verdict.is_deal and photo_ok and not learned
+            is_deal = (
+                bool(match) and verdict.is_deal and photo_ok and not learned and not row["sold"]
+            )
             notes = [match.note] if match and match.note else []
             if learned:
                 notes.insert(0, "🚩 Likely fake: " + learned)
@@ -418,6 +426,51 @@ class Scanner:
             )
             c.executemany("UPDATE listings SET is_deal = 0, dismissed = 1 WHERE item_id = ?", junk)
         return new_deals
+
+    async def check_availability(self, seen_now: set[str], errors: list[str]) -> None:
+        """Ask eBay whether current deals and basket items are still for sale.
+
+        Listings just seen in this scan's searches are live. The rest (most likely to have
+        sold) are checked a few per scan, oldest check first, within the eBay call budget."""
+        timestamp = now_iso()
+        with self.db.tx() as c:
+            c.executemany(
+                "UPDATE listings SET checked_at = ? WHERE item_id = ?",
+                [(timestamp, i) for i in seen_now],
+            )
+        if self.db.calls_today() >= self.settings.ebay_daily_call_budget * 0.9:
+            return
+        recent = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        rows = self.db.query(
+            """
+            SELECT l.item_id FROM listings l LEFT JOIN basket b ON b.listing_id = l.item_id
+            WHERE l.sold = 0 AND l.dismissed = 0
+              AND (l.is_deal = 1 OR b.listing_id IS NOT NULL)
+              AND COALESCE(l.checked_at, '') < ?
+            ORDER BY b.listing_id IS NULL, COALESCE(l.checked_at, '')
+            LIMIT ?
+            """,
+            (recent, AVAILABILITY_CHECKS_PER_SCAN),
+        )
+        for row in rows:
+            if row["item_id"] in seen_now:
+                continue
+            try:
+                status = await self.ebay.item_status(row["item_id"])
+            except BudgetExhausted:
+                return
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"availability check: {type(exc).__name__}")
+                continue
+            if status is None:
+                continue
+            with self.db.tx() as c:
+                c.execute(
+                    "UPDATE listings SET checked_at = ?,"
+                    " sold = CASE WHEN ? THEN 1 ELSE sold END,"
+                    " is_deal = CASE WHEN ? THEN 0 ELSE is_deal END WHERE item_id = ?",
+                    (now_iso(), status == "gone", status == "gone", row["item_id"]),
+                )
 
     async def check_photos(
         self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], limit: int = 10
@@ -533,7 +586,8 @@ class Scanner:
             FROM listings l
             JOIN items i ON i.id = l.match_item_id
             JOIN cards c ON c.id = i.card_id
-            WHERE l.dismissed = 0 AND i.owned = 0 AND i.hidden = 0 AND l.last_seen >= ?
+            WHERE l.dismissed = 0 AND l.sold = 0 AND i.owned = 0 AND i.hidden = 0
+              AND l.last_seen >= ?
               {"AND l.is_deal = 1" if deals_only else ""}
             ORDER BY l.is_deal DESC, i.priority DESC, l.discount_pct DESC
             LIMIT ?
