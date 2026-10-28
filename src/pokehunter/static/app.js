@@ -6,7 +6,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const gbp = (n) => (n == null ? "–" : "£" + Number(n).toFixed(2));
 const COND = { NM: "Near Mint", LP: "Lightly Played", MP: "Moderately Played", HP: "Heavily Played", DMG: "Damaged", "?": "Condition not stated" };
 const PHOTO = { genuine: ["good", "📷 Looks genuine"], unsure: ["warn", "📷 Photo unclear"], fake: ["bad", "📷 Fake"], not_a_card: ["bad", "📷 Not a card"], wrong_card: ["bad", "📷 Wrong card"] };
-const FILTER_DEFAULTS = { q: "", sort: "best", poke: "All", cond: [], vars: [], max: "", min: "", disc: "", fb: "", star: false, photo: false, verified: false, post: false };
+const FILTER_DEFAULTS = { q: "", sort: "best", poke: "All", cond: [], vars: [], max: "", min: "", disc: "", fb: "", star: false, photo: false, verified: false, post: false, alerts: false };
 const state = {
   scope: store("scope", "deals"),
   listings: [],
@@ -194,22 +194,48 @@ function syncFilterInputs() {
   $("#f-photo").checked = f.photo;
   $("#f-verified").checked = f.verified;
   $("#f-post").checked = f.post;
-  const pokes = ["All", ...(state.status?.progress || []).map((p) => p.pokemon)];
-  $("#f-poke").innerHTML = pokes.map((p) => `<button data-v="${esc(p)}" class="${p === f.poke ? "on" : ""}">${esc(p)}</button>`).join("");
+  $("#f-alerts").checked = f.alerts;
+  renderPokeChips();
   $$("#f-cond button").forEach((b) => b.classList.toggle("on", f.cond.includes(b.dataset.v)));
   $$("#f-var button").forEach((b) => b.classList.toggle("on", f.vars.includes(b.dataset.v)));
   $$("#scope button").forEach((b) => b.classList.toggle("on", b.dataset.scope === state.scope));
+}
+// The Pokémon buttons come from the card list, so they're (re)drawn once the status loads.
+function renderPokeChips() {
+  const pokes = ["All", ...(state.status?.progress || []).map((p) => p.pokemon)];
+  $("#f-poke").innerHTML = pokes.map((p) => `<button data-v="${esc(p)}" class="${p === state.f.poke ? "on" : ""}">${esc(p)}</button>`).join("");
 }
 function activeFilterCount() {
   const f = state.f;
   return ["q", "max", "min", "disc", "fb"].filter((k) => f[k]).length + (f.poke !== "All") + f.cond.length + f.vars.length +
     ["star", "photo", "verified", "post"].filter((k) => f[k]).length;
 }
+// Filters apply as soon as you change them; "Save filters" keeps them on the server so they
+// stick on every device (and can also decide which deals are sent to Telegram).
 function saveFilters() {
   store("filters", null, JSON.stringify(state.f));
   $("#filter-count").textContent = activeFilterCount() || "";
+  $("#f-saved").textContent = "Not saved yet";
+  $("#f-save").classList.add("primary");
   renderDeals();
 }
+async function loadSavedFilters() {
+  try {
+    state.f = { ...FILTER_DEFAULTS, ...(await api("/api/filters")) };
+    store("filters", null, JSON.stringify(state.f));
+  } catch { /* keep this device's copy */ }
+  syncFilterInputs();
+  $("#filter-count").textContent = activeFilterCount() || "";
+  $("#f-saved").textContent = "Saved";
+  $("#f-save").classList.remove("primary");
+  renderDeals();
+}
+$("#f-save").addEventListener("click", async () => {
+  state.f = { ...FILTER_DEFAULTS, ...(await api("/api/filters", state.f)) };
+  $("#f-saved").textContent = "Saved ✓";
+  $("#f-save").classList.remove("primary");
+  toast(state.f.alerts ? "Filters saved. Telegram alerts will follow them too." : "Filters saved 👍");
+});
 $("#filter-toggle").addEventListener("click", () => $("#filters").classList.toggle("open"));
 $("#scope").addEventListener("click", (e) => {
   const b = e.target.closest("button");
@@ -221,7 +247,7 @@ $("#scope").addEventListener("click", (e) => {
 });
 [["#f-search", "q"], ["#f-sort", "sort"], ["#f-max", "max"], ["#f-min", "min"], ["#f-disc", "disc"], ["#f-fb", "fb"]].forEach(([sel, key]) =>
   $(sel).addEventListener("input", (e) => { state.f[key] = e.target.value; saveFilters(); }));
-[["#f-star", "star"], ["#f-photo", "photo"], ["#f-verified", "verified"], ["#f-post", "post"]].forEach(([sel, key]) =>
+[["#f-star", "star"], ["#f-photo", "photo"], ["#f-verified", "verified"], ["#f-post", "post"], ["#f-alerts", "alerts"]].forEach(([sel, key]) =>
   $(sel).addEventListener("change", (e) => { state.f[key] = e.target.checked; saveFilters(); }));
 $("#f-poke").addEventListener("click", (e) => {
   const b = e.target.closest("button");
@@ -277,6 +303,7 @@ const SORTS = {
 
 function renderDeals() {
   const shown = state.listings.filter(passes).sort(SORTS[state.f.sort] || SORTS.best);
+  if (state.scope === "deals") $("#deal-count").textContent = shown.length || "";
   const what = state.scope === "deals" ? "deals" : "listings";
   $("#result-line").textContent = state.listings.length
     ? `Showing ${shown.length} of ${state.listings.length} ${what}` + (activeFilterCount() ? " (filtered)" : "")
@@ -849,7 +876,7 @@ $("#test-alert").addEventListener("click", (e) => action(e.target, "/api/test-al
 async function refresh() {
   try {
     await loadStatus();
-    if (!$("#f-poke").children.length) syncFilterInputs();
+    if ($("#f-poke").children.length < 2) renderPokeChips();
     await loadDeals();
   } catch (err) {
     $("#status").textContent = "Can't reach the server: " + err.message;
@@ -858,6 +885,6 @@ async function refresh() {
 syncFilterInputs();
 $("#filter-count").textContent = activeFilterCount() || "";
 showTab(store("tab", "deals"));
-refresh();
+refresh().then(loadSavedFilters);
 loadBasket();
 setInterval(refresh, 60_000);

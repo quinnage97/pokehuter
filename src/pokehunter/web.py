@@ -21,6 +21,7 @@ from .catalog import refresh_catalog, reprice
 from .config import Settings
 from .db import Database, now_iso
 from .ebay import EbayClient
+from .filters import clean
 from .learning import learn, record_fake, summary, undo_fake
 from .matching import CONDITION_LABEL, VARIANT_LABEL, variant_label
 from .photocheck import PhotoChecker
@@ -494,6 +495,18 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
         with engine(request).db.tx() as c:
             c.execute("UPDATE listings SET dismissed=1 WHERE item_id=?", (listing_id,))
         return {"ok": True}
+
+    @app.get("/api/filters")
+    async def get_filters(request: Request) -> dict[str, Any]:
+        return clean(engine(request).db.get_kv("deal_filters", {}) or {})
+
+    @app.post("/api/filters")
+    async def save_filters(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Save the Deals tab filters (and whether they also decide Telegram alerts)."""
+        e = engine(request)
+        saved = clean(body)
+        e.db.set_kv("deal_filters", saved)
+        return saved
 
     @app.get("/api/prefs")
     async def get_prefs(request: Request) -> dict[str, Any]:

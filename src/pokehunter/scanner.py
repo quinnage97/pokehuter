@@ -12,6 +12,7 @@ from .catalog import load_card_refs
 from .config import Settings
 from .db import Database, now_iso
 from .ebay import BudgetExhausted, EbayClient, EbayError, Listing
+from .filters import clean, passes
 from .learning import Signals, learn
 from .matching import CONDITION_FACTOR, match_title, variant_label
 from .photocheck import CHEAP_PHOTO_MODEL, REJECT, PhotoChecker
@@ -489,15 +490,20 @@ class Scanner:
         self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], errors: list[str]
     ) -> int:
         new_deals.sort(key=lambda d: (-d["priority"], -d["discount"]))
-        sent = 0
+        sent = queued = 0
         by_id = {d["listing_id"]: d for d in self.deals()}
-        for index, deal in enumerate(new_deals):
+        saved = clean(self.db.get_kv("deal_filters", {}) or {})
+        for deal in new_deals:
             status = None
+            row = by_id.get(deal["item_id"])
             if not prefs["alerts_enabled"] or not self.settings.telegram_ready:
                 status = "off"
-            elif index >= prefs["max_alerts_per_scan"]:
+            elif saved["alerts"] and row and not passes(row, saved):
+                status = "filtered"  # outside the saved Deals filters; still on the website
+            elif queued >= prefs["max_alerts_per_scan"]:
                 status = "capped"  # still shown on the website
-            elif deal["item_id"] in by_id:
+            elif row:
+                queued += 1
                 try:
                     await self.telegram.send(
                         format_deal(by_id[deal["item_id"]], self.settings.public_url)

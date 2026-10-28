@@ -149,6 +149,8 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 .toggles { gap: 6px 16px; }
 .tog { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; cursor: pointer; }
 .result-line { margin: 0 2px 8px; }
+.savefilters { border-top: 1px solid var(--line); padding-top: 10px; }
+.savefilters .spacer { flex: 1; }
 
 /* deals */
 .deals { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
