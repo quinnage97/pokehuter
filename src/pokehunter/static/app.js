@@ -321,6 +321,14 @@ $("#deals").addEventListener("click", async (e) => {
     showPicture(`<img src="${esc(e.target.src)}" alt="">`, $(".name", card).textContent);
     return;
   }
+  if (e.target.closest(".ref")) {
+    const d = state.listings.find((l) => l.listing_id === card.dataset.listing);
+    const cardId = card.dataset.item.split(":")[0];
+    showPicture(picture(cardSources(d, "high"), d.card_name), d.card_name,
+      `<p class="hint">This is the picture used in your collection too.</p>
+       <p><button class="btn small" onclick="choosePicture('${esc(cardId)}')">🖼 Wrong picture? Change it</button></p>`);
+    return;
+  }
   const btn = e.target.closest("button[data-act]");
   if (!btn) return;
   if (btn.dataset.act === "basket") {
@@ -728,6 +736,7 @@ $("#learned").addEventListener("click", async (e) => {
 
 // pick a different picture for a card
 window.choosePicture = async (cardId) => {
+  if (!state.items.length) state.items = (await api("/api/cards")).items;
   const card = state.items.find((i) => i.card_id === cardId);
   const { official, ebay } = await api(`/api/cards/${encodeURIComponent(cardId)}/photos`);
   const thumb = (url) => `<button class="pick" data-url="${esc(url)}"><img src="${esc(url)}" alt="" loading="lazy" onerror="this.closest('.pick').remove()"></button>`;
@@ -749,7 +758,10 @@ window.choosePicture = async (cardId) => {
       $("#card-dialog").close();
       $("#card-dialog").onclick = null;
       toast(url ? "Picture updated 🖼" : "Back to the default picture");
+      // The same picture is used on deals, the priority watch and the basket: refresh them all.
       renderChecklist();
+      loadDeals();
+      loadBasket();
     } catch (err) { toast(err.message); }
   };
 };
