@@ -524,6 +524,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             raise HTTPException(400, "Invalid setting value") from exc
         if prefs["price_source"] != before:
             reprice(e.db)
+        await asyncio.to_thread(e.scanner.refresh_flags)  # apply the new rules straight away
         return prefs
 
     @app.post("/api/scan")

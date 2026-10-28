@@ -77,7 +77,7 @@ def test_fake_and_basket_api(catalog_db, settings):
         assert basket["items"][0]["variant_label"] == "Holo"
         cards = c.get("/api/cards").json()["items"]
         holo = next(i for i in cards if i["id"] == "base1-4:holo")
-        assert holo["cheapest_total"] == 150.0 and holo["cheapest_listing"] == "1"
+        assert holo["cheapest_total"] == 201.0 and holo["cheapest_listing"] == "1"
 
         learned = c.post("/api/listings/2/fake", json={"reason": "Wrong font"}).json()
         assert learned["sellers"] == ["seller"] and learned["reports"][0]["reason"] == "Wrong font"

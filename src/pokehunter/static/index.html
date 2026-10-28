@@ -128,11 +128,26 @@
       <form id="prefs">
         <div class="panel">
           <h2>💷 Deal rules</h2>
-          <label class="row">Alert when at least <input name="min_discount_pct" type="number" min="0" max="90">% under the fair price</label>
-          <label class="row">…or for ⭐ starred cards <input name="priority_discount_pct" type="number" min="0" max="90">% under</label>
+          <label class="row">Alert when between <input name="min_discount_pct" type="number" min="0" max="90">%
+            and <input name="max_discount_pct" type="number" min="0" max="100">% below the market price</label>
+          <p class="hint">Much cheaper than the upper limit usually means a damaged copy, so it's skipped.</p>
+          <label class="row">…for ⭐ starred cards, from <input name="priority_discount_pct" type="number" min="0" max="90">% below</label>
+          <label class="row">Compare with
+            <select name="discount_basis">
+              <option value="market">the Near Mint market price</option>
+              <option value="condition">a price adjusted for the stated condition</option>
+            </select>
+          </label>
+          <div class="row"><b>Conditions to alert on</b></div>
+          <div class="chips multi conds" id="allowed-conds">
+            <label class="tog"><input type="checkbox" data-cond="NM"> Near Mint</label>
+            <label class="tog"><input type="checkbox" data-cond="LP"> Lightly Played</label>
+            <label class="tog"><input type="checkbox" data-cond="MP"> Moderately Played</label>
+            <label class="tog"><input type="checkbox" data-cond="HP"> Heavily Played</label>
+            <label class="tog"><input type="checkbox" data-cond="DMG"> Damaged</label>
+            <label class="tog"><input type="checkbox" data-cond="?"> Not stated</label>
+          </div>
           <label class="row">Minimum saving £<input name="min_saving_gbp" type="number" min="0"></label>
-          <label class="row">Accept MP/HP (played) copies for cards worth over £<input name="played_ok_above_gbp" type="number" min="0"></label>
-          <label class="row tog"><input name="allow_damaged" type="checkbox"> Accept damaged copies</label>
           <label class="row">Price guide
             <select name="price_source">
               <option value="lowest">Lowest of Cardmarket and TCGplayer (safest)</option>
@@ -140,8 +155,9 @@
               <option value="tcgplayer">TCGplayer (US)</option>
             </select>
           </label>
-          <p class="hint">Fair price = the lower of the price guide and what other eBay sellers typically ask,
-            × condition (NM 100%, LP 85%, MP 70%, HP 55%, damaged 40%, not stated 80%).</p>
+          <p class="hint">Market price = the lower of the price guide and what other eBay sellers typically
+            ask for a Near Mint copy. With "adjusted for condition", it's then scaled by condition
+            (NM 100%, LP 85%, MP 70%, HP 55%, damaged 40%, not stated 80%).</p>
         </div>
 
         <div class="panel">

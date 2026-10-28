@@ -21,8 +21,7 @@ def format_deal(deal: dict[str, Any], public_url: str | None) -> str:
     price_line = f"<b>£{deal['total']:.2f}</b> delivered"
     if deal.get("fair_gbp") and deal.get("discount_pct") is not None:
         price_line += (
-            f" (fair price for this condition ≈ £{deal['fair_gbp']:.2f}, "
-            f"<b>{deal['discount_pct']:.0f}% under</b>)"
+            f" (market ≈ £{deal['fair_gbp']:.2f}, <b>{deal['discount_pct']:.0f}% under</b>)"
         )
     if deal.get("target_price") and deal["total"] <= deal["target_price"]:
         price_line += f"\nAt or below your £{deal['target_price']:.2f} alert price"

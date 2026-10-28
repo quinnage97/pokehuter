@@ -118,13 +118,16 @@ MIGRATIONS = [
 
 # Defaults for the options shown on the website's Settings tab.
 DEFAULT_PREFS: dict[str, Any] = {
-    "min_discount_pct": 20,  # alert when this far below the condition-adjusted price
-    "priority_discount_pct": 5,  # looser threshold for starred cards
+    # Alert when a listing is between these two % below the market price; much cheaper
+    # usually means a damaged copy.
+    "min_discount_pct": 20,
+    "max_discount_pct": 30,
+    "priority_discount_pct": 5,  # looser lower limit for starred cards
+    "discount_basis": "market",  # % off the Near Mint market price, or "condition"-adjusted
+    "allowed_conditions": ["NM", "LP", "?"],
     "min_saving_gbp": 2,
     # Far cheaper than this is almost never the real card (fakes, stickers, lucky dips).
     "suspicious_above_pct": 50,
-    "played_ok_above_gbp": 15,  # MP/HP copies are only considered for cards worth this much
-    "allow_damaged": False,
     "min_seller_feedback": 5,
     "trusted_seller_above_gbp": 30,  # cards worth this much...
     "trusted_seller_feedback": 50,  # ...need a seller with at least this much feedback
@@ -145,7 +148,9 @@ DEFAULT_PREFS: dict[str, Any] = {
 CHOICES = {
     "price_source": ("lowest", "cardmarket", "tcgplayer"),
     "photo_check_model": ("best", "cheap"),
+    "discount_basis": ("market", "condition"),
 }
+CONDITIONS = ("NM", "LP", "MP", "HP", "DMG", "?")
 
 
 def now_iso() -> str:
@@ -214,6 +219,8 @@ class Database:
             default = DEFAULT_PREFS[key]
             if isinstance(default, bool):
                 current[key] = bool(value)
+            elif key == "allowed_conditions":
+                current[key] = [c for c in CONDITIONS if c in (value or [])]
             elif isinstance(default, int):
                 current[key] = max(0, int(float(value)))
             elif value in CHOICES.get(key, ()):

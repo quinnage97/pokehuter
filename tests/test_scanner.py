@@ -10,8 +10,8 @@ from pokehunter.ebay import EbayClient, parse_item
 from pokehunter.scanner import Scanner, evaluate, search_query
 
 LISTINGS = [
-    # Base Charizard, LP: fair = 304 * 0.85 = 258.40. £150 delivered is 42% under.
-    ebay_item("1", "Charizard 4/102 Base Set Holo LP", "149.00"),
+    # Base Charizard, LP, £201 delivered: about 27% below the market price.
+    ebay_item("1", "Charizard 4/102 Base Set Holo LP", "200.00"),
     # Fairly priced copies, which also confirm the guide price is realistic on eBay.
     ebay_item("2", "Charizard 4/102 Base Set Holo NM", "330.00"),
     ebay_item("6", "Charizard 4/102 Base Set Unlimited Holo Rare", "299.00"),
@@ -60,9 +60,9 @@ def test_scan_finds_deal_and_alerts_once(catalog_db, settings):
     assert result["errors"] == []
     deals = scanner.deals()
     assert [d["listing_id"] for d in deals] == ["1"]
-    # eBay lower quartile of 150/300/310/331 is £262.50, below the £304 guide, so it's used.
-    assert deals[0]["ebay_median_gbp"] == 262.5 and deals[0]["ebay_comps"] == 4
-    assert deals[0]["fair_gbp"] == round(262.5 * 0.85, 2) and deals[0]["total"] == 150.0
+    # eBay lower quartile of 201/300/310/331 is £275.25, below the £304 guide, so it's used.
+    assert deals[0]["ebay_median_gbp"] == 275.25 and deals[0]["ebay_comps"] == 4
+    assert deals[0]["fair_gbp"] == 275.25 and deals[0]["total"] == 201.0
     assert len(fake.messages) == 1 and "Charizard" in fake.messages[0]
     # Sweep queries per Pokémon plus targeted card searches.
     assert fake.searches[:2] == ["Charizard", "Mew"]
@@ -108,45 +108,52 @@ def test_alerts_respect_settings(catalog_db, settings):
     assert fake.messages == [] and len(scanner.deals()) == 1
 
 
-def test_evaluate_rules():
+def test_evaluate_band_for_lightly_played():
+    """Default rules: 20-30% below the Near Mint market price, NM / LP / not stated only."""
+    from pokehunter.db import DEFAULT_PREFS as prefs
+
+    item = {"market_gbp": 100.0, "target_price": None, "priority": 0}
+
+    def at(price, condition="LP", **extra):
+        listing = parse_item(ebay_item("x", "t", f"{price:.2f}", shipping="0"), "GBP")
+        return evaluate(listing, condition, {**item, **extra}, prefs)
+
+    assert at(79).is_deal and at(79).discount == 21.0 and at(79).fair == 100.0
+    assert at(75, "NM").is_deal and at(72, "?").is_deal
+    assert not at(85).is_deal  # only 15% off
+    assert not at(65).is_deal  # 35% off: too damaged
+    assert not at(79, "MP").is_deal and not at(79, "HP").is_deal and not at(79, "DMG").is_deal
+    assert at(95, priority=1).is_deal  # starred cards from 5% off
+    assert not at(65, priority=1).is_deal  # ...but the same 30% cap
+    assert at(65, target_price=70.0).is_deal  # your own "Alert at £" price always works
+    low_feedback = parse_item(
+        ebay_item("y", "t", "10.00", seller={"username": "new", "feedbackScore": 0}), "GBP"
+    )
+    assert not evaluate(low_feedback, "NM", {**item, "market_gbp": 13.0}, prefs).is_deal
+
+
+def test_evaluate_condition_adjusted_mode():
+    from pokehunter.db import DEFAULT_PREFS
+
     prefs = {
-        "min_discount_pct": 20,
-        "priority_discount_pct": 5,
-        "min_saving_gbp": 2,
-        "played_ok_above_gbp": 15,
-        "allow_damaged": False,
-        "min_seller_feedback": 5,
-        "trusted_seller_above_gbp": 30,
-        "trusted_seller_feedback": 50,
-        "suspicious_above_pct": 50,
+        **DEFAULT_PREFS,
+        "discount_basis": "condition",
+        "max_discount_pct": 100,
+        "allowed_conditions": ["NM", "LP", "MP", "HP", "DMG", "?"],
     }
     item = {"market_gbp": 100.0, "target_price": None, "priority": 0}
     listing = parse_item(ebay_item("x", "t", "79.00", shipping="0"), "GBP")
     assert evaluate(listing, "NM", item, prefs).is_deal  # 21% under
     assert not evaluate(listing, "LP", item, prefs).is_deal  # fair 85, only 7% under
     assert evaluate(listing, "LP", {**item, "priority": 1}, prefs).is_deal
-    assert not evaluate(listing, "DMG", {**item, "market_gbp": 500.0}, prefs).is_deal
-    low_feedback = parse_item(
-        ebay_item("y", "t", "10.00", seller={"username": "new", "feedbackScore": 0}), "GBP"
-    )
-    assert not evaluate(low_feedback, "NM", {**item, "market_gbp": 13.0}, prefs).is_deal
     too_cheap = parse_item(ebay_item("z", "t", "10.00", shipping="0"), "GBP")
     assert not evaluate(too_cheap, "NM", item, prefs).is_deal  # 90% under: not a real card
 
 
 def test_ebay_prices_override_a_bad_price_guide():
     """Mew VMAX 269/264: the guide said £173 but copies sell on eBay for about £18."""
-    prefs = {
-        "min_discount_pct": 20,
-        "priority_discount_pct": 5,
-        "min_saving_gbp": 2,
-        "played_ok_above_gbp": 15,
-        "allow_damaged": False,
-        "min_seller_feedback": 5,
-        "trusted_seller_above_gbp": 30,
-        "trusted_seller_feedback": 50,
-        "suspicious_above_pct": 50,
-    }
+    from pokehunter.db import DEFAULT_PREFS as prefs
+
     item = {"market_gbp": 173.4, "ebay_median_gbp": 18.0, "target_price": None, "priority": 0}
     listing = parse_item(ebay_item("m", "t", "45.00", shipping="0"), "GBP")
     verdict = evaluate(listing, "NM", item, prefs)
@@ -154,17 +161,8 @@ def test_ebay_prices_override_a_bad_price_guide():
 
 
 def test_fakes_far_below_ebay_prices_are_ignored():
-    prefs = {
-        "min_discount_pct": 20,
-        "priority_discount_pct": 5,
-        "min_saving_gbp": 2,
-        "played_ok_above_gbp": 15,
-        "allow_damaged": False,
-        "min_seller_feedback": 5,
-        "trusted_seller_above_gbp": 30,
-        "trusted_seller_feedback": 50,
-        "suspicious_above_pct": 50,
-    }
+    from pokehunter.db import DEFAULT_PREFS as prefs
+
     # Delta Charizard: genuine copies around £400 on eBay, a "deal" at £100 is a fake.
     item = {"market_gbp": 488.0, "ebay_median_gbp": 420.0, "target_price": None, "priority": 0}
     listing = parse_item(ebay_item("d", "t", "100.19", shipping="0"), "GBP")
@@ -242,9 +240,9 @@ def test_valuable_cards_need_established_seller():
     # Charizard V 79/73 gold fake: seller with 25 feedback.
     item = {"market_gbp": 120.0, "ebay_median_gbp": 110.0, "target_price": None, "priority": 0}
     seller = {"username": "new", "feedbackScore": 25}
-    listing = parse_item(ebay_item("v", "t", "70.00", shipping="0", seller=seller), "GBP")
+    listing = parse_item(ebay_item("v", "t", "85.00", shipping="0", seller=seller), "GBP")
     assert not evaluate(listing, "LP", item, DEFAULT_PREFS).is_deal
-    trusted = parse_item(ebay_item("w", "t", "70.00", shipping="0"), "GBP")  # 250 feedback
+    trusted = parse_item(ebay_item("w", "t", "85.00", shipping="0"), "GBP")  # 250 feedback
     assert evaluate(trusted, "LP", item, DEFAULT_PREFS).is_deal
 
 

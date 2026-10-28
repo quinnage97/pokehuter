@@ -361,7 +361,7 @@ function dealCard(d) {
     <div class="body">
       <div class="name">${esc(d.card_name)}</div>
       <div class="meta">${esc(d.set_name)} · #${esc(number)} · ${esc(d.variant_label || d.variant)}</div>
-      <div class="priceline"><span class="price">${gbp(d.total)}</span><span class="fair">delivered${saving != null ? ` · fair <b>${gbp(d.fair_gbp)}</b>` : ""}</span></div>
+      <div class="priceline"><span class="price">${gbp(d.total)}</span><span class="fair">delivered${saving != null ? ` · market <b>${gbp(d.fair_gbp)}</b>` : ""}</span></div>
       <div class="fair">Price guide ${gbp(d.market_gbp)} · eBay typical ${d.ebay_median_gbp ? gbp(d.ebay_median_gbp) : "–"}</div>
       <div class="badges">${badges}</div>
       <div class="title">${esc(d.title)}</div>
@@ -703,7 +703,7 @@ function showBasket() {
       <div><span>Cards</span><b>${gbp(cards)}</b></div>
       <div><span>Postage</span><b>${gbp(post)}</b></div>
       <div class="grand"><span>Total</span><b>${gbp(cards + post)}</b></div>
-      ${fair ? `<div><span>Fair value</span><b>${gbp(fair)}</b></div><div class="save"><span>You'd save</span><b>${gbp(fair - cards - post)}</b></div>` : ""}
+      ${fair ? `<div><span>Market value</span><b>${gbp(fair)}</b></div><div class="save"><span>You'd save</span><b>${gbp(fair - cards - post)}</b></div>` : ""}
     </div>
     ${shared.length ? `<p class="hint">💡 ${shared.map(([s, n]) => `${n} items from ${esc(s)}`).join(", ")}: ask about combined postage.</p>` : ""}
     <div class="actions end"><button class="btn ghost small" data-basket="empty">Empty basket</button>
@@ -859,14 +859,17 @@ async function loadPrefs() {
     if (!el) continue;
     if (el.type === "checkbox") el.checked = !!v; else el.value = v;
   }
+  $$("#allowed-conds input").forEach((box) => (box.checked = (prefs.allowed_conditions || []).includes(box.dataset.cond)));
 }
 $("#prefs").addEventListener("submit", async (e) => {
   e.preventDefault();
   const data = {};
   for (const el of e.target.elements) if (el.name) data[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  data.allowed_conditions = $$("#allowed-conds input:checked").map((box) => box.dataset.cond);
   try {
     await api("/api/prefs", data);
-    toast("Settings saved. They apply from the next scan.");
+    toast("Settings saved and applied ✓");
+    loadDeals();
   } catch (err) { toast("Problem: " + err.message); }
 });
 $("#photo-save").addEventListener("click", async () => {

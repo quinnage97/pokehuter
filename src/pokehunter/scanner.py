@@ -41,16 +41,15 @@ def evaluate(
     target = item.get("target_price")
     candidates = [p for p in (guide, ebay_typical) if p]
     base = min(candidates) if candidates else None
-    fair = round(base * CONDITION_FACTOR[condition], 2) if base else None
+    # "market": % off the Near Mint market price (a band like 20-30% off finds lightly played
+    # copies; cheaper usually means too damaged). "condition": % off a condition-adjusted price.
+    if prefs["discount_basis"] == "condition":
+        fair = round(base * CONDITION_FACTOR[condition], 2) if base else None
+    else:
+        fair = round(base, 2) if base else None
     discount = round((fair - listing.total) / fair * 100, 1) if fair else None
 
-    value = base or target or 0
-    if condition == "DMG":
-        condition_ok = prefs["allow_damaged"]
-    elif condition in ("MP", "HP"):
-        condition_ok = value >= prefs["played_ok_above_gbp"]
-    else:
-        condition_ok = True
+    condition_ok = condition in prefs["allowed_conditions"]
     # Valuable cards need an established seller: new accounts are where most fakes come from.
     needed = prefs["min_seller_feedback"]
     if (base or target or 0) >= prefs["trusted_seller_above_gbp"]:
@@ -61,7 +60,7 @@ def evaluate(
     by_market = (
         fair is not None
         and discount is not None
-        and discount >= threshold
+        and threshold <= discount <= prefs["max_discount_pct"]
         and fair - listing.total >= prefs["min_saving_gbp"]
     )
     # When the price guide and eBay disagree wildly, one of them is wrong (a bad guide price, or
@@ -76,7 +75,8 @@ def evaluate(
     # Fakes are priced far below every genuine copy. Without other eBay listings to compare
     # with, be stricter still.
     limit = prefs["suspicious_above_pct"] if ebay_typical else prefs["suspicious_above_pct"] * 0.7
-    suspicious = discount is not None and discount > limit
+    # (When the two prices disagree, the % is meaningless; only your own price can alert.)
+    suspicious = discount is not None and discount > limit and not disagree
 
     warnings = []
     if disagree:
