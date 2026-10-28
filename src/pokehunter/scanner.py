@@ -14,7 +14,7 @@ from .db import Database, now_iso
 from .ebay import BudgetExhausted, EbayClient, EbayError, Listing
 from .learning import Signals, learn
 from .matching import CONDITION_FACTOR, match_title, variant_label
-from .photocheck import REJECT, PhotoChecker
+from .photocheck import CHEAP_PHOTO_MODEL, REJECT, PhotoChecker
 
 log = logging.getLogger(__name__)
 DEAL_WINDOW_HOURS = 36  # how long a listing stays on the site after we last saw it
@@ -423,6 +423,13 @@ class Scanner:
         new_deals.sort(key=lambda d: (-d["priority"], -d["discount"]))
         keep: list[dict[str, Any]] = []
         checked = 0
+        day_key = f"photo_checks:{now_iso()[:10]}"
+        used = int(self.db.get_kv(day_key, 0) or 0)
+        model = (
+            CHEAP_PHOTO_MODEL
+            if prefs["photo_check_model"] == "cheap"
+            else self.settings.photo_check_model
+        )
         for deal in new_deals:
             row = self.db.one(
                 """
@@ -436,9 +443,14 @@ class Scanner:
             if not row:
                 continue
             if row["photo_verdict"] is None:
+                if used >= prefs["photo_checks_per_day"]:
+                    keep.append(deal)  # today's allowance is used up: alert without a check
+                    continue
                 if checked >= limit:
                     continue
                 checked += 1
+                used += 1
+                self.db.set_kv(day_key, used)
                 number = row["local_id"] + (
                     f"/{row['set_official']}" if row["set_official"] else ""
                 )
@@ -448,7 +460,11 @@ class Scanner:
                 )
                 examples = self.signals.reasons.get(row["card_id"], [])
                 result = await self.photos.check(
-                    claimed, row["title"], json.loads(row["images_json"] or "[]"), examples
+                    claimed,
+                    row["title"],
+                    json.loads(row["images_json"] or "[]"),
+                    examples,
+                    model=model,
                 )
                 with self.db.tx() as c:
                     c.execute(

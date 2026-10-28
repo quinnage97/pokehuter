@@ -20,6 +20,7 @@ from .db import Database
 log = logging.getLogger(__name__)
 
 REJECT = {"fake", "not_a_card", "wrong_card"}
+CHEAP_PHOTO_MODEL = "claude-haiku-5-5"
 MAX_IMAGE_BYTES = 4_500_000
 MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
@@ -114,7 +115,12 @@ class PhotoChecker:
         }
 
     async def check(
-        self, claimed: str, title: str, image_urls: list[str], examples: list[str] | None = None
+        self,
+        claimed: str,
+        title: str,
+        image_urls: list[str],
+        examples: list[str] | None = None,
+        model: str | None = None,
     ) -> PhotoVerdict:
         images = [img for url in image_urls[:3] if (img := await self._download(url))]
         if not images:
@@ -128,18 +134,26 @@ class PhotoChecker:
             )
         prompt += "Look at the photos above and give your verdict."
         try:
-            message = await self.client().beta.messages.create(
-                model=self.settings.photo_check_model,
-                max_tokens=4000,
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-                system=SYSTEM,
-                output_config={
+            model = model or self.settings.photo_check_model
+            request = {
+                "model": model,
+                "max_tokens": 4000,
+                "system": SYSTEM,
+                "output_config": {
                     "effort": "medium",
                     "format": {"type": "json_schema", "schema": SCHEMA},
                 },
-                messages=[{"role": "user", "content": [*images, {"type": "text", "text": prompt}]}],
-            )
+                "messages": [
+                    {"role": "user", "content": [*images, {"type": "text", "text": prompt}]}
+                ],
+            }
+            if model.startswith("claude-haiku"):
+                # Haiku has no server-side refusal fallback; a refusal is handled below.
+                message = await self.client().messages.create(**request)
+            else:
+                message = await self.client().beta.messages.create(
+                    **request, betas=["server-side-fallback-2026-07-01"], fallbacks="default"
+                )
         except anthropic.AuthenticationError:
             return PhotoVerdict("unsure", "Photo check key was rejected; check it in Settings")
         except anthropic.RateLimitError:

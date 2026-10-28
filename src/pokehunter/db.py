@@ -128,11 +128,20 @@ DEFAULT_PREFS: dict[str, Any] = {
     "trusted_seller_feedback": 50,  # ...need a seller with at least this much feedback
     "uk_sellers_only": True,
     "photo_check_enabled": True,
+    "photo_checks_per_day": 20,  # caps what the photo check can cost in a day
+    "photo_check_model": "best",  # "best" (Opus) or "cheap" (Haiku)
     "block_reported_sellers": True,
     "alerts_enabled": True,
     "max_alerts_per_scan": 10,
     "targeted_per_scan": 30,
     "price_source": "lowest",  # or "cardmarket" / "tcgplayer"
+}
+
+
+# Allowed values for the text settings.
+CHOICES = {
+    "price_source": ("lowest", "cardmarket", "tcgplayer"),
+    "photo_check_model": ("best", "cheap"),
 }
 
 
@@ -204,7 +213,7 @@ class Database:
                 current[key] = bool(value)
             elif isinstance(default, int):
                 current[key] = max(0, int(float(value)))
-            elif key == "price_source" and value in ("lowest", "cardmarket", "tcgplayer"):
+            elif value in CHOICES.get(key, ()):
                 current[key] = value
         self.set_kv("prefs", current)
         return current

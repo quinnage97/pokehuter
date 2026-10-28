@@ -171,6 +171,8 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             "ebay_ready": settings.ebay_ready,
             "telegram_ready": settings.telegram_ready,
             "photo_check_ready": e.photos.ready,
+            "photo_checks_today": int(e.db.get_kv(f"photo_checks:{now_iso()[:10]}", 0) or 0),
+            "photo_checks_per_day": e.db.prefs()["photo_checks_per_day"],
             "error": e.last_error,
             "progress": counts,
             "interval_minutes": settings.scan_interval_minutes,

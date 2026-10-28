@@ -154,6 +154,15 @@
               <button type="button" id="photo-clear" class="btn ghost small">Remove</button>
             </div>
             <label class="row tog"><input name="photo_check_enabled" type="checkbox"> Check photos before alerting</label>
+            <label class="row">Check at most <input name="photo_checks_per_day" type="number" min="0"> listings a day
+              <span class="hint">(after that, deals alert unchecked, so costs can't run away)</span></label>
+            <label class="row">Model
+              <select name="photo_check_model">
+                <option value="best">Best at spotting fakes (Claude Opus · about 3–5p a check)</option>
+                <option value="cheap">Cheapest (Claude Haiku · under 1p a check)</option>
+              </select>
+            </label>
+            <p class="hint" id="photo-usage"></p>
           </div>
           <label class="row">Ignore anything more than <input name="suspicious_above_pct" type="number" min="0" max="100">% under (almost always fake)</label>
           <label class="row tog"><input name="uk_sellers_only" type="checkbox"> UK sellers only</label>

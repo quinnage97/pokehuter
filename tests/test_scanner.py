@@ -271,10 +271,11 @@ class StubPhotos:
         self.verdict = verdict
         self.calls = []
 
-    async def check(self, claimed, title, image_urls, examples=None):
+    async def check(self, claimed, title, image_urls, examples=None, model=None):
         from pokehunter.photocheck import PhotoVerdict
 
         self.calls.append((claimed, title, image_urls))
+        self.models = [*getattr(self, "models", []), model]
         return PhotoVerdict(self.verdict, "Whole card is gold metal")
 
 
@@ -319,3 +320,20 @@ def test_no_percentage_deal_when_guide_and_ebay_disagree():
     assert not verdict.is_deal and "disagree" in verdict.warning
     # A price you set yourself still triggers.
     assert evaluate(listing, "?", {**item, "target_price": 25.0}, DEFAULT_PREFS).is_deal
+
+
+def test_photo_check_daily_allowance(catalog_db, settings):
+    catalog_db.update_prefs({"photo_checks_per_day": 0, "photo_check_model": "cheap"})
+    fake = FakeEbay()
+    photos = StubPhotos("fake")
+    _, scanner = run_scan_with_photos(catalog_db, settings, fake, photos)
+    # Allowance used up: no check, so the deal still alerts (unchecked).
+    assert photos.calls == [] and len(fake.messages) == 1
+
+
+def test_cheap_photo_model_choice(catalog_db, settings):
+    catalog_db.update_prefs({"photo_check_model": "cheap"})
+    photos = StubPhotos("genuine")
+    run_scan_with_photos(catalog_db, settings, FakeEbay(), photos)
+    assert photos.models == ["claude-haiku-5-5"]
+    assert catalog_db.get_kv(f"photo_checks:{__import__('pokehunter.db').db.now_iso()[:10]}") == 1
