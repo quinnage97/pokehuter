@@ -194,7 +194,6 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
         e = engine(request)
         return {
             "deals": labelled(e.scanner.listings(deals_only=not everything)),
-            "watch": labelled(e.scanner.priority_watch()),
             "conditions": CONDITION_LABEL,
             "variants": VARIANT_LABEL,
         }

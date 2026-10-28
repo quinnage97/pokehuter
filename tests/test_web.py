@@ -75,7 +75,7 @@ def test_photo_key_is_stored_but_never_returned(catalog_db, settings):
 def test_all_listings_view(catalog_db, settings):
     with client(settings) as c:
         body = c.get("/api/deals?everything=true").json()
-        assert body["deals"] == [] and "watch" in body
+        assert body["deals"] == []
 
 
 def test_choose_card_picture(catalog_db, settings):

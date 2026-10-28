@@ -537,24 +537,3 @@ class Scanner:
 
     def deals(self) -> list[dict[str, Any]]:
         return self.listings(deals_only=True)
-
-    def priority_watch(self) -> list[dict[str, Any]]:
-        """Cheapest recent listing for every starred card, deal or not."""
-        cutoff = (datetime.now(UTC) - timedelta(hours=DEAL_WINDOW_HOURS)).isoformat()
-        return self.db.query(
-            """
-            SELECT i.id AS item, i.variant, i.market_gbp, i.target_price,
-                   c.name AS card_name, c.set_name, c.local_id, c.image AS card_image,
-                   c.image_alt, c.custom, c.image_override, l.item_id AS listing_id, l.title,
-                   l.url, l.total,
-                   l.condition, l.fair_gbp, l.discount_pct, MIN(l.total) AS cheapest
-            FROM items i JOIN cards c ON c.id = i.card_id
-            LEFT JOIN listings l ON l.match_item_id = i.id AND l.last_seen >= ?
-                 AND l.dismissed = 0
-                 AND COALESCE(l.photo_verdict, '') NOT IN ('fake', 'not_a_card', 'wrong_card')
-            WHERE i.priority = 1 AND i.owned = 0
-            GROUP BY i.id
-            ORDER BY c.release_date, c.local_id
-            """,
-            (cutoff,),
-        )

@@ -10,7 +10,6 @@ const FILTER_DEFAULTS = { q: "", sort: "best", poke: "All", cond: [], vars: [], 
 const state = {
   scope: store("scope", "deals"),
   listings: [],
-  watch: [],
   items: [],
   status: null,
   f: { ...FILTER_DEFAULTS, ...JSON.parse(store("filters", "{}")) },
@@ -179,9 +178,7 @@ async function loadStatus() {
 async function loadDeals() {
   const data = await api("/api/deals" + (state.scope === "all" ? "?everything=true" : ""));
   state.listings = data.deals;
-  state.watch = data.watch;
   if (state.scope === "deals") $("#deal-count").textContent = data.deals.length || "";
-  renderWatch();
   renderDeals();
 }
 
@@ -370,21 +367,6 @@ $("#deals").addEventListener("click", async (e) => {
   }
   await Promise.all([loadDeals(), loadStatus()]);
 });
-
-function renderWatch() {
-  $("#watch-wrap").hidden = !state.watch.length;
-  $("#watch").innerHTML = state.watch.map((w) => `
-    <div class="w">
-      ${picture(cardSources(w), w.card_name)}
-      <div>
-        <div class="n">${esc(w.card_name)}</div>
-        <div class="hint">${esc(w.set_name)} #${esc(w.local_id)} · ${esc(w.variant_label || w.variant)}</div>
-        ${w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener"><b>${gbp(w.total)}</b></a> <span class="hint">${w.condition === "?" ? "" : esc(w.condition)}</span>`
-          : `<span class="hint">None listed yet</span>`}
-        <div class="hint">guide ${gbp(w.market_gbp)}${w.target_price ? ` · alert at ${gbp(w.target_price)}` : ""}</div>
-      </div>
-    </div>`).join("");
-}
 
 // ---------------------------------------------------------------- collection
 async function loadCards() {
@@ -791,7 +773,7 @@ window.choosePicture = async (cardId) => {
       $("#card-dialog").close();
       $("#card-dialog").onclick = null;
       toast(url ? "Picture updated 🖼" : "Back to the default picture");
-      // The same picture is used on deals, the priority watch and the basket: refresh them all.
+      // The same picture is used on deals and in the basket: refresh them all.
       renderChecklist();
       loadDeals();
       loadBasket();
