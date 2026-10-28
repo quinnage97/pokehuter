@@ -142,7 +142,7 @@ async function loadStatus() {
   ps.textContent = s.photo_check_ready ? "On" : "Off: no key";
   ps.className = "badge " + (s.photo_check_ready ? "good" : "warn");
   $("#photo-usage").textContent = s.photo_check_ready
-    ? `Checked today: ${s.photo_checks_today} of ${s.photo_checks_per_day}. You can also set a monthly spend limit at console.anthropic.com → Settings → Limits.`
+    ? `Checked today: ${s.photo_checks_today} of ${s.photo_checks_per_day}. You can also set a monthly spend limit in the Anthropic Console billing settings.`
     : "";
   $("#system").textContent = [
     `eBay keys: ${s.ebay_ready ? "set ✅" : "missing ❌"}`,
