@@ -105,3 +105,33 @@ def test_untick_and_recently_added(catalog_db, settings):
         status = c.get("/api/status").json()
         charizard = next(p for p in status["progress"] if p["pokemon"] == "Charizard")
         assert charizard["owned"] == 1
+
+
+def test_startup_recheck_hides_junk(catalog_db, settings):
+    import asyncio
+
+    import httpx
+
+    from pokehunter.web import Engine
+
+    with catalog_db.tx() as c:
+        c.execute(
+            "INSERT INTO listings (item_id, title, url, price, shipping, total, condition,"
+            " first_seen, last_seen, match_item_id, is_deal)"
+            " VALUES ('p', 'A4 PHOTOGRAPHIC print Charizard 4/102', 'u', 5, 2, 7, '?', 'x',"
+            " strftime('%Y-%m-%dT%H:%M:%S+00:00','now'), 'base1-4:holo', 1)"
+        )
+
+    async def go():
+        settings.ebay_client_id = None  # no scanning, just the start-up recheck
+        async with httpx.AsyncClient() as http:
+            engine = Engine(settings, http)
+            task = asyncio.create_task(engine.loop())
+            await asyncio.sleep(0.3)
+            task.cancel()
+            row = engine.db.one("SELECT dismissed FROM listings WHERE item_id='p'")
+            engine.db.close()
+            return row
+
+    settings.catalog_refresh_hours = 10_000
+    assert asyncio.run(go())["dismissed"] == 1

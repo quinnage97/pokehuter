@@ -78,9 +78,14 @@ class Engine:
             self.busy = None
 
     async def loop(self) -> None:
-        # Apply any pricing-rule changes from an update straight away.
+        # Apply pricing and filter changes from an update straight away, rather than at the
+        # end of the first scan (junk caught by new filters disappears immediately).
         with contextlib.suppress(Exception):
             reprice(self.db)
+        try:
+            self.scanner.refresh_flags()
+        except Exception:  # noqa: BLE001
+            log.exception("start-up recheck failed")
         while True:
             if self.catalog_stale():
                 await self.refresh_catalog()
