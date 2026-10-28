@@ -111,6 +111,7 @@ MIGRATIONS = [
     ("listings", "photo_verdict", "TEXT"),
     ("listings", "photo_reason", "TEXT"),
     ("listings", "user_verdict", "TEXT"),
+    ("items", "owned_at", "TEXT"),
 ]
 
 # Defaults for the options shown on the website's Settings tab.

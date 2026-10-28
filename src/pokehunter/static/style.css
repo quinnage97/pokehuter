@@ -301,6 +301,16 @@ label.row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-
 .totals .grand { font-size: 18px; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; }
 .totals .save b { color: var(--good); }
 
+.recent summary { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.recent summary::-webkit-details-marker { display: none; }
+.recent summary::before { content: "▸"; color: var(--muted); }
+.recent[open] summary::before { content: "▾"; }
+.recent[open] summary { margin-bottom: 4px; }
+.toast .undo {
+  margin-left: 12px; border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 900;
+  padding: 4px 10px; border-radius: 8px; cursor: pointer;
+}
+
 /* dialogs + toast */
 dialog {
   border: 0; border-radius: 20px; padding: 0; background: var(--card); color: var(--ink); width: min(560px, calc(100vw - 24px));

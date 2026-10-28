@@ -196,7 +196,8 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
     async def cards(request: Request) -> dict[str, Any]:
         rows = engine(request).db.query(
             """
-            SELECT i.id, i.card_id, i.variant, i.owned, i.hidden, i.priority, i.target_price,
+            SELECT i.id, i.card_id, i.variant, i.owned, i.owned_at, i.hidden, i.priority,
+                   i.target_price,
                    i.market_gbp, i.price_source, i.ebay_median_gbp, i.ebay_comps,
                    c.pokemon, c.name, c.local_id, c.set_id, c.set_name, c.set_official,
                    c.release_date, c.serie_name, c.rarity, c.image, c.image_alt, c.custom,
@@ -349,6 +350,9 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
                 price = None
             sets.append("target_price=?")
             values.append(price)
+        if "owned" in changes:  # remembered for the "Recently added" list
+            sets.append("owned_at=?")
+            values.append(now_iso() if changes["owned"] else None)
         if sets:
             with e.db.tx() as c:
                 c.execute(f"UPDATE items SET {', '.join(sets)} WHERE id=?", (*values, item_id))
@@ -448,16 +452,36 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
     async def basket_bought(request: Request) -> dict[str, Any]:
         """We bought everything in the basket: tick the cards off and empty it."""
         e = engine(request)
+        newly_owned = [
+            row["id"]
+            for row in e.db.query(
+                "SELECT DISTINCT i.id FROM basket b JOIN listings l ON l.item_id = b.listing_id"
+                " JOIN items i ON i.id = l.match_item_id WHERE i.owned = 0"
+            )
+        ]
         with e.db.tx() as c:
-            c.execute(
-                "UPDATE items SET owned = 1 WHERE id IN (SELECT l.match_item_id FROM basket b"
-                " JOIN listings l ON l.item_id = b.listing_id)"
+            c.executemany(
+                "UPDATE items SET owned = 1, owned_at = ? WHERE id = ?",
+                [(now_iso(), item_id) for item_id in newly_owned],
             )
             c.execute(
                 "UPDATE listings SET dismissed = 1 WHERE item_id IN (SELECT listing_id FROM basket)"
             )
             c.execute("DELETE FROM basket")
-        return {"items": []}
+        return {"items": [], "newly_owned": newly_owned}
+
+    @app.post("/api/items-bulk")
+    async def update_items(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, int]:
+        """Mark several card versions owned or not owned at once (used by Undo)."""
+        e = engine(request)
+        ids = [str(i) for i in body.get("ids") or []]
+        owned = bool(body.get("owned"))
+        with e.db.tx() as c:
+            changed = c.executemany(
+                "UPDATE items SET owned = ?, owned_at = ? WHERE id = ?",
+                [(int(owned), now_iso() if owned else None, item_id) for item_id in ids],
+            ).rowcount
+        return {"changed": changed}
 
     @app.post("/api/listings/{listing_id}/dismiss")
     async def dismiss(request: Request, listing_id: str) -> dict[str, bool]:

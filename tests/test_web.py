@@ -90,3 +90,18 @@ def test_choose_card_picture(catalog_db, settings):
         c.post("/api/cards/base1-4/image", json={"url": ""})
         items = c.get("/api/cards").json()["items"]
         assert next(i for i in items if i["card_id"] == "base1-4")["image_override"] is None
+
+
+def test_untick_and_recently_added(catalog_db, settings):
+    with client(settings) as c:
+        r = c.post("/api/items/base1-4:holo", json={"owned": True}).json()
+        assert r["owned"] == 1 and r["owned_at"]
+        items = c.get("/api/cards").json()["items"]
+        assert next(i for i in items if i["id"] == "base1-4:holo")["owned_at"]
+        r = c.post("/api/items/base1-4:holo", json={"owned": False}).json()
+        assert r["owned"] == 0 and r["owned_at"] is None
+        c.post("/api/items-bulk", json={"ids": ["base1-4:holo", "swsh4-25:holo"], "owned": True})
+        c.post("/api/items-bulk", json={"ids": ["base1-4:holo"], "owned": False})
+        status = c.get("/api/status").json()
+        charizard = next(p for p in status["progress"] if p["pokemon"] == "Charizard")
+        assert charizard["owned"] == 1

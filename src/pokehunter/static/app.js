@@ -34,12 +34,26 @@ async function api(path, body, method) {
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
   return res.json();
 }
-function toast(msg) {
+function toast(msg, undo) {
   const t = $("#toast");
   t.textContent = msg;
+  if (undo) {
+    const b = document.createElement("button");
+    b.className = "undo";
+    b.textContent = "Undo";
+    b.onclick = async () => { t.hidden = true; await undo(); };
+    t.append(b);
+  }
   t.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), 3200);
+  toast.timer = setTimeout(() => (t.hidden = true), undo ? 7000 : 3200);
+}
+// Mark card versions owned / not owned, then refresh everything that shows them.
+async function setOwned(ids, owned) {
+  await api("/api/items-bulk", { ids, owned });
+  state.items = [];
+  await Promise.all([loadStatus(), loadDeals()]);
+  if (!$("#tab-checklist").hidden) loadCards();
 }
 function ago(iso) {
   if (!iso) return "never";
@@ -317,8 +331,9 @@ $("#deals").addEventListener("click", async (e) => {
   }
   if (btn.dataset.act === "fake") return reportFake(card.dataset.listing, $(".name", card).textContent);
   if (btn.dataset.act === "got") {
-    await api(`/api/items/${encodeURIComponent(card.dataset.item)}`, { owned: true });
-    toast("Ticked off in your collection 🎉");
+    const itemId = card.dataset.item;
+    await api(`/api/items/${encodeURIComponent(itemId)}`, { owned: true });
+    toast("Ticked off in your collection 🎉", async () => { await setOwned([itemId], false); toast("Undone: marked as needed again"); });
     state.items = [];
   } else {
     await api(`/api/listings/${encodeURIComponent(card.dataset.listing)}/dismiss`, {});
@@ -416,12 +431,28 @@ function renderChecklist() {
       ? "Nothing left to find with these filters. Amazing!" : "No cards match these filters."}</div>`;
     return;
   }
-  $("#checklist").innerHTML = [...sets.values()].map((s) => `
+  $("#checklist").innerHTML = recentlyAdded() + [...sets.values()].map((s) => `
     <div class="set">
       <div class="set-head"><h3>${esc(s.name)} <span class="hint">${s.date && s.date !== "9999" ? s.date.slice(0, 4) : ""}</span></h3>
         <span class="hint"><b>${s.have}</b>/${s.total} owned</span></div>
       <div class="cards">${s.cards.map(tile).join("")}</div>
     </div>`).join("");
+}
+function recentlyAdded() {
+  const recent = state.items.filter((i) => i.owned && i.owned_at)
+    .sort((a, b) => b.owned_at.localeCompare(a.owned_at)).slice(0, 8);
+  if (!recent.length || state.picking) return "";
+  return `
+    <details class="panel recent" ${store("recentOpen", "1") === "1" ? "open" : ""}>
+      <summary><b>🕘 Recently added</b> <span class="hint">Added one by mistake? Remove it here.</span></summary>
+      ${recent.map((i) => `
+        <div class="brow">
+          ${picture(cardSources(i), i.name, "bthumb")}
+          <div class="bmain"><b>${esc(i.name)}</b><div class="hint">${esc(i.set_name)} #${esc(i.local_id)} · ${esc(i.variant_label || i.variant)}</div>
+            <div class="hint">added ${ago(i.owned_at)}</div></div>
+          <div class="bside"><button class="btn small" data-unown="${esc(i.id)}">Remove</button></div>
+        </div>`).join("")}
+    </details>`;
 }
 function tile(card) {
   const live = card.variants.filter((v) => !v.hidden);
@@ -467,8 +498,12 @@ $("#checklist").addEventListener("change", async (e) => {
   const row = e.target.closest(".variant");
   if (!row) return;
   if (e.target.dataset.f === "owned") {
-    await saveItem(row, { owned: e.target.checked });
-    toast(e.target.checked ? "Added to your collection 🎉" : "Marked as needed");
+    const owned = e.target.checked;
+    await saveItem(row, { owned });
+    toast(owned ? "Added to your collection 🎉" : "Marked as needed", async () => {
+      await setOwned([row.dataset.id], !owned);
+      toast("Undone");
+    });
     setTimeout(renderChecklist, 600);
   }
   if (e.target.dataset.f === "target_price") {
@@ -476,7 +511,17 @@ $("#checklist").addEventListener("change", async (e) => {
     toast(e.target.value ? `You'll be alerted at £${e.target.value} or less` : "Alert price removed");
   }
 });
+$("#checklist").addEventListener("toggle", (e) => {
+  if (e.target.classList?.contains("recent")) store("recentOpen", null, e.target.open ? "1" : "0");
+}, true);
 $("#checklist").addEventListener("click", async (e) => {
+  const unown = e.target.closest("[data-unown]");
+  if (unown) {
+    const id = unown.dataset.unown;
+    await setOwned([id], false);
+    toast("Removed from your collection", async () => { await setOwned([id], true); toast("Undone"); });
+    return;
+  }
   const pick = e.target.closest("[data-pick]");
   if (pick) {
     const id = pick.dataset.pick;
@@ -614,10 +659,10 @@ function showBasket() {
       setBasket(left);
       toast("Basket emptied");
     } else {
-      await api("/api/basket/bought", {});
+      const { newly_owned: ticked } = await api("/api/basket/bought", {});
       setBasket([]);
       state.items = [];
-      toast("Ticked off in your collection 🎉");
+      toast(`Ticked off ${ticked.length} in your collection 🎉`, async () => { await setOwned(ticked, false); toast("Undone: marked as needed again"); });
       loadStatus();
       loadDeals();
     }

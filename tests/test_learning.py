@@ -87,6 +87,9 @@ def test_fake_and_basket_api(catalog_db, settings):
         undone = c.post(f"/api/learning/undo/{learned['id']}").json()
         assert undone["reports"] == []
 
-        assert c.post("/api/basket/bought").json() == {"items": []}
+        assert c.post("/api/basket/bought").json() == {
+            "items": [],
+            "newly_owned": ["base1-4:holo"],
+        }
         cards = c.get("/api/cards").json()["items"]
         assert next(i for i in cards if i["id"] == "base1-4:holo")["owned"] == 1
