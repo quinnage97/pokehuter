@@ -157,6 +157,34 @@ def test_trainer_gallery_number():
     assert match.card.id == "swsh11tg-TG03"
 
 
+XY121 = CardRef(
+    "xyp-XY121", "Charizard", "Charizard EX", "XY121", "XY Black Star Promos", 0, {"holo": 100.0}
+)
+MCHAR = CardRef("xy12-101", "Charizard", "M Charizard EX", "101", "Evolutions", 108, {"holo": 60.0})
+VMAX = CardRef(
+    "swsh3-20", "Charizard", "Charizard VMAX", "20", "Darkness Ablaze", 189, {"holo": 30.0}
+)
+OBF = CardRef("sv03-125", "Charizard", "Charizard ex", "125", "Obsidian Flames", 197, {"holo": 5.0})
+
+
+def test_wrong_form_in_title_is_rejected():
+    title = "Pokémon TCG Mega Charizard X EX XY121 Pokemon Promos Promo Holo 360HP EN 2016"
+    assert match_title(title, [XY121])[0] is None
+    assert match_title("Charizard EX XY121 Black Star Promo", [XY121])[0].card.id == "xyp-XY121"
+
+
+def test_forms_that_match_are_fine():
+    assert match_title("Mega Charizard EX 101/108 Evolutions", [MCHAR])[0]
+    assert match_title("M Charizard EX 101/108", [MCHAR])[0]
+    assert match_title("Charizard 101/108 Evolutions full art", [MCHAR])[0]
+    assert match_title("Charizard V MAX 020/189 Darkness Ablaze", [VMAX])[0]
+    assert match_title("Charizard VMAX 020/189", [VMAX])[0]
+    # Obsidian Flames Charizard ex is Darkness type; "dark" here isn't "Dark Charizard".
+    assert match_title("Charizard ex 125/197 Obsidian Flames Dark Tera", [OBF])[0]
+    assert match_title("Dark Charizard 125/197", [OBF])[0] is None
+    assert match_title("Charizard GX 020/189", [VMAX])[0] is None
+
+
 def test_mewtwo_is_not_mew():
     match, _ = match_title("Mewtwo 114/264 holo", CARDS)
     assert match is None

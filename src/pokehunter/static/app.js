@@ -684,7 +684,8 @@ const FAKE_REASONS = ["Gold / metal / foil card", "Wrong font or blurry print", 
 function reportFake(listingId, name) {
   showPicture("", `🚩 Mark ${name} as fake`, `
     <p class="hint">What gave it away? This teaches the bot: the seller gets blocked, telltale title words and
-      price levels are learned, and the photo check is told what to look for.</p>
+      price levels are learned, and the photo check is told what to look for.
+      Choose only "Wrong card" for a real card listed under the wrong name: it's hidden without blocking the seller.</p>
     <div class="chips multi" id="fake-reasons">${FAKE_REASONS.map((r) => `<button>${esc(r)}</button>`).join("")}</div>
     <p><input id="fake-note" type="text" placeholder="Anything else? (optional)" style="width:100%"></p>
     <div class="actions end"><button class="btn ghost" data-fake="cancel">Cancel</button><button class="btn primary" data-fake="send">Mark as fake</button></div>`);
@@ -695,7 +696,16 @@ function reportFake(listingId, name) {
     const b = e.target.closest("[data-fake]");
     if (!b) return;
     if (b.dataset.fake === "send") {
-      const reason = [...$$("#fake-reasons button.on").map((x) => x.textContent), $("#fake-note").value.trim()].filter(Boolean).join("; ");
+      const chosen = $$("#fake-reasons button.on").map((x) => x.textContent);
+      if (chosen.length === 1 && chosen[0] === "Wrong card" && !$("#fake-note").value.trim()) {
+        // A genuine card listed under the wrong name/number: hide it, don't punish the seller.
+        await api(`/api/listings/${encodeURIComponent(listingId)}/dismiss`, {});
+        await basketRemove(listingId);
+        toast("Hidden as the wrong card (seller not blocked)");
+        $("#card-dialog").close();
+        return loadDeals();
+      }
+      const reason = [...chosen, $("#fake-note").value.trim()].filter(Boolean).join("; ");
       const learned = await api(`/api/listings/${encodeURIComponent(listingId)}/fake`, { reason });
       state.basket.delete(listingId);
       toast(`Thanks! Blocking ${learned.sellers.length} seller${learned.sellers.length === 1 ? "" : "s"} and learning from ${learned.reports.length} report${learned.reports.length === 1 ? "" : "s"} 🧠`);

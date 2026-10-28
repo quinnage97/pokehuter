@@ -307,3 +307,15 @@ def test_photo_check_genuine_alerts_with_note(catalog_db, settings):
     _, scanner = run_scan_with_photos(catalog_db, settings, fake, StubPhotos("genuine"))
     assert [d["listing_id"] for d in scanner.deals()] == ["1"]
     assert "Photo check: looks genuine" in fake.messages[0]
+
+
+def test_no_percentage_deal_when_guide_and_ebay_disagree():
+    from pokehunter.db import DEFAULT_PREFS
+
+    # Base Set Charizard: guide £378, but bait/fake listings drag eBay's lower quartile to £44.
+    item = {"market_gbp": 378.34, "ebay_median_gbp": 44.34, "target_price": None, "priority": 0}
+    listing = parse_item(ebay_item("b", "t", "21.85", shipping="0"), "GBP")
+    verdict = evaluate(listing, "?", item, DEFAULT_PREFS)
+    assert not verdict.is_deal and "disagree" in verdict.warning
+    # A price you set yourself still triggers.
+    assert evaluate(listing, "?", {**item, "target_price": 25.0}, DEFAULT_PREFS).is_deal

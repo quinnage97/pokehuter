@@ -62,6 +62,14 @@ def evaluate(
         and discount >= threshold
         and fair - listing.total >= prefs["min_saving_gbp"]
     )
+    # When the price guide and eBay disagree wildly, one of them is wrong (a bad guide price, or
+    # eBay prices dragged down by fakes, reprints and bait listings) and we can't tell which.
+    # Don't alert on a percentage off; an "Alert at £" price still works.
+    disagree = bool(
+        guide and ebay_typical and max(guide, ebay_typical) > 2.5 * min(guide, ebay_typical)
+    )
+    if disagree:
+        by_market = False
     by_target = target is not None and listing.total <= target
     # Fakes are priced far below every genuine copy. Without other eBay listings to compare
     # with, be stricter still.
@@ -69,6 +77,11 @@ def evaluate(
     suspicious = discount is not None and discount > limit
 
     warnings = []
+    if disagree:
+        warnings.append(
+            f"Price guide £{guide:.2f} and eBay prices £{ebay_typical:.2f} disagree a lot, so no"
+            " % deal alert; set an 'Alert at £' price for this card to be told about it"
+        )
     if not ebay_typical:
         warnings.append("Not enough other eBay listings to double-check the price")
     if not listing.shipping_known:

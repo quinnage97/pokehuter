@@ -85,6 +85,27 @@ def digits(value: str) -> int | None:
     return int(found) if found else None
 
 
+_FORMS = [
+    ("mega", r"\bmega\b|\bm\s+(?:charizard|mew)\b"),
+    ("gx", r"\bgx\b"),
+    ("vmax", r"\bvmax\b"),
+    ("vstar", r"\bvstar\b"),
+    ("v", r"\bv\b"),
+    ("break", r"\bbreak\b"),
+    ("dark", r"\bdark\s+(?:charizard|mew)\b"),
+    ("shining", r"\bshining\s+(?:charizard|mew)\b"),
+    ("radiant", r"\bradiant\s+(?:charizard|mew)\b"),
+    ("delta", r"δ|\bdelta\b"),
+]
+_FORMS = [(form, re.compile(rx, re.I)) for form, rx in _FORMS]
+
+
+def card_forms(text: str) -> set[str]:
+    """Which special form a name or title mentions: Mega, GX, V, VMAX, Dark, Shining..."""
+    text = re.sub(r"\bv[\s-]+(max|star)\b", r"v\1", text, flags=re.I)
+    return {form for form, pattern in _FORMS if pattern.search(text)}
+
+
 def word_match(name: str, text: str) -> bool:
     """True if `name` appears as its own word: 'Mew' matches 'Mew ex' but not 'Mewtwo'."""
     return re.search(rf"(?<![a-z]){re.escape(name.lower())}(?![a-z])", text.lower()) is not None
@@ -176,6 +197,10 @@ def match_title(title: str, cards: list[CardRef]) -> tuple[Match | None, str]:
             continue
         # "Mew" listings must not be Mewtwo cards (unless the card itself names Mewtwo).
         if word_match("mewtwo", title) and not word_match("mewtwo", card.name):
+            continue
+        # A title naming a form the card isn't (e.g. "Mega Charizard X ex" with the number of
+        # the plain "Charizard EX" promo) is a different card.
+        if card_forms(title) - card_forms(card.name):
             continue
         number = norm_number(card.local_id)
         if fractions:
