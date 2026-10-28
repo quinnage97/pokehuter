@@ -361,7 +361,7 @@ function renderWatch() {
       <div>
         <div class="n">${esc(w.card_name)}</div>
         <div class="hint">${esc(w.set_name)} #${esc(w.local_id)} · ${esc(w.variant_label || w.variant)}</div>
-        ${w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener"><b>${gbp(w.total)}</b></a> <span class="hint">${esc(w.condition)}</span>`
+        ${w.url ? `<a href="${esc(w.url)}" target="_blank" rel="noopener"><b>${gbp(w.total)}</b></a> <span class="hint">${w.condition === "?" ? "" : esc(w.condition)}</span>`
           : `<span class="hint">None listed yet</span>`}
         <div class="hint">guide ${gbp(w.market_gbp)}${w.target_price ? ` · alert at ${gbp(w.target_price)}` : ""}</div>
       </div>

@@ -54,7 +54,10 @@ _EXCLUDED = re.compile(
     r"|phone case|display (?:case|stand|frame)|wooden|engraved|etched|carbon"
     # Art cases / extended-art displays: printed artwork around a card, or no card at all.
     r"|extended art|(?:art|custom|acrylic|resin|epoxy) (?:case|block|display)|art cases?"
-    r"|magnetic (?:art|extended|display)|lenticular|3d art|card art display|shadow ?box)\b",
+    r"|magnetic (?:art|extended|display)|lenticular|3d art|card art display|shadow ?box"
+    # Photo prints and posters of a card. "4th print" / "1st print" are real printings.
+    r"|photographic|photo ?print|a[2-6]|glossy print|wall art"
+    r"|(?<!st )(?<!nd )(?<!rd )(?<!th )prints?)\b",
     re.I,
 )
 _NON_ENGLISH = re.compile(

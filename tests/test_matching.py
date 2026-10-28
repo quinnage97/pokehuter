@@ -88,6 +88,9 @@ def test_condition(title, condition):
         "M Charizard EX Full Art - 101/108 - XY - Magnetic Extended Art Case",
         "Charizard 4/102 custom art case display",
         "Mew 151/165 acrylic block art display",
+        "A4 PHOTOGRAPHIC print Pokémon TCG Mew ex Full Art Holo 151 152/128 English HP160",
+        "Charizard 4/102 Base Set print poster",
+        "Mew ex 152/128 photo print",
         "Pokemon 150/147 Charizard GX sp250 tarjeta carta Pokemon.España",
     ],
 )
@@ -102,6 +105,8 @@ def test_rejections(title):
         "Charizard 199/165 Special Illustration Rare 151 Near Mint",
         "Charizard ex 223/197 Obsidian Flames SIR in toploader",
         "M Charizard EX Full Art 101/108 Evolutions in magnetic one touch case",
+        "Charizard 4/102 Base Set 4th print UK 2000",
+        "Charizard 4/102 Base Set misprint error holo",
     ],
 )
 def test_real_listings_not_rejected(title):
