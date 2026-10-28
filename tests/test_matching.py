@@ -217,3 +217,21 @@ def test_number_required():
 def test_first_edition_on_card_without_it_is_rejected():
     match, _ = match_title("1st edition Charizard 025/185", CARDS)
     assert match is None
+
+
+CHARIZARD_G = CardRef(
+    "pl3-20",
+    "Charizard",
+    "Charizard G",
+    "20",
+    "Supreme Victors",
+    147,
+    {"normal": 30.0, "reverse": 40.0},
+)
+
+
+def test_charizard_g_mp_listing():
+    title = "MP Condition Charizard G Non Holo Rare Platinum Supreme Victors 20/147 Pokémon"
+    match, reason = match_title(title, [CHARIZARD_G])
+    assert match, reason
+    assert match.variant == "normal" and match.condition == "MP"

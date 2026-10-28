@@ -135,3 +135,10 @@ def test_startup_recheck_hides_junk(catalog_db, settings):
 
     settings.catalog_refresh_hours = 10_000
     assert asyncio.run(go())["dismissed"] == 1
+
+
+def test_old_default_conditions_gain_mp(catalog_db, settings):
+    catalog_db.set_kv("prefs", {"allowed_conditions": ["NM", "LP", "?"]})
+    assert catalog_db.prefs()["allowed_conditions"] == ["NM", "LP", "MP", "?"]
+    catalog_db.set_kv("prefs", {"allowed_conditions": ["NM"]})  # a deliberate choice stays
+    assert catalog_db.prefs()["allowed_conditions"] == ["NM"]

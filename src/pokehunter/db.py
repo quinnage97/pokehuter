@@ -124,7 +124,7 @@ DEFAULT_PREFS: dict[str, Any] = {
     "max_discount_pct": 30,
     "priority_discount_pct": 5,  # looser lower limit for starred cards
     "discount_basis": "market",  # % off the Near Mint market price, or "condition"-adjusted
-    "allowed_conditions": ["NM", "LP", "?"],
+    "allowed_conditions": ["NM", "LP", "MP", "?"],
     "min_saving_gbp": 2,
     # Far cheaper than this is almost never the real card (fakes, stickers, lucky dips).
     "suspicious_above_pct": 50,
@@ -209,6 +209,10 @@ class Database:
 
     def prefs(self) -> dict[str, Any]:
         stored = self.get_kv("prefs", {}) or {}
+        # Moderately Played was added to the defaults later; bring settings saved with the
+        # old default list along (a list someone chose themselves is left alone).
+        if stored.get("allowed_conditions") == ["NM", "LP", "?"]:
+            stored["allowed_conditions"] = ["NM", "LP", "MP", "?"]
         return {**DEFAULT_PREFS, **{k: v for k, v in stored.items() if k in DEFAULT_PREFS}}
 
     def update_prefs(self, changes: dict[str, Any]) -> dict[str, Any]:

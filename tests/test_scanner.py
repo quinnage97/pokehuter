@@ -109,7 +109,7 @@ def test_alerts_respect_settings(catalog_db, settings):
 
 
 def test_evaluate_band_for_lightly_played():
-    """Default rules: 20-30% below the Near Mint market price, NM / LP / not stated only."""
+    """Default rules: 20-30% below the Near Mint market price, NM / LP / MP / not stated."""
     from pokehunter.db import DEFAULT_PREFS as prefs
 
     item = {"market_gbp": 100.0, "target_price": None, "priority": 0}
@@ -122,7 +122,8 @@ def test_evaluate_band_for_lightly_played():
     assert at(75, "NM").is_deal and at(72, "?").is_deal
     assert not at(85).is_deal  # only 15% off
     assert not at(65).is_deal  # 35% off: too damaged
-    assert not at(79, "MP").is_deal and not at(79, "HP").is_deal and not at(79, "DMG").is_deal
+    assert at(79, "MP").is_deal  # Moderately Played is welcome...
+    assert not at(79, "HP").is_deal and not at(79, "DMG").is_deal  # ...heavily played isn't
     assert at(95, priority=1).is_deal  # starred cards from 5% off
     assert not at(65, priority=1).is_deal  # ...but the same 30% cap
     assert at(65, target_price=70.0).is_deal  # your own "Alert at £" price always works
