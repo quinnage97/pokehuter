@@ -334,12 +334,15 @@ class Scanner:
     ) -> list[dict[str, Any]]:
         cutoff = (datetime.now(UTC) - timedelta(hours=DEAL_WINDOW_HOURS)).isoformat()
         rows = self.db.query("SELECT * FROM listings WHERE last_seen >= ?", (cutoff,))
-        updates, new_deals = [], []
+        updates, new_deals, junk = [], [], []
         for row in rows:
             # Re-match with today's rules, so improvements (e.g. holo detection) apply to
             # listings already stored.
             match, _ = match_title(row["title"], cards)
-            item_id = f"{match.card.id}:{match.variant}" if match else row["match_item_id"]
+            if not match:
+                junk.append((row["item_id"],))  # rejected by today's filters, e.g. art cases
+                continue
+            item_id = f"{match.card.id}:{match.variant}"
             if item_id not in items:
                 item_id = row["match_item_id"]
             item = items.get(item_id)
@@ -394,6 +397,7 @@ class Scanner:
                 " warning=?, match_item_id=? WHERE item_id=?",
                 updates,
             )
+            c.executemany("UPDATE listings SET is_deal = 0, dismissed = 1 WHERE item_id = ?", junk)
         return new_deals
 
     async def check_photos(

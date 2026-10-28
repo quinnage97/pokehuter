@@ -85,6 +85,9 @@ def test_condition(title, condition):
         "Plastic Fan Art Pokemon TCG Shining Charizard 107/105 Neo Destiny Holo",
         "POKELOTTERIA - CHARIZARD 146/144 Skyridge ITA - READ DESCRIPTION",
         "Charizard 4/102 Base Set GER",
+        "M Charizard EX Full Art - 101/108 - XY - Magnetic Extended Art Case",
+        "Charizard 4/102 custom art case display",
+        "Mew 151/165 acrylic block art display",
         "Pokemon 150/147 Charizard GX sp250 tarjeta carta Pokemon.España",
     ],
 )
@@ -98,6 +101,7 @@ def test_rejections(title):
         "Charizard 4/102 Base Set Holo Pack Fresh NM",
         "Charizard 199/165 Special Illustration Rare 151 Near Mint",
         "Charizard ex 223/197 Obsidian Flames SIR in toploader",
+        "M Charizard EX Full Art 101/108 Evolutions in magnetic one touch case",
     ],
 )
 def test_real_listings_not_rejected(title):

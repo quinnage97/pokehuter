@@ -51,7 +51,10 @@ _EXCLUDED = re.compile(
     r"|skins?|vinyl|decals?|fan ?art|plastic|novelty|hand ?made|inspired|tribute|unofficial"
     r"|not (?:real|original|genuine)|lotter(?:y|ia)|raffle|giveaway|packs|god pack"
     r"|pack opening|pacchett\w*|read description|printed|art card|canvas|magnets?|patch"
-    r"|phone case|display (?:case|stand|frame)|wooden|engraved|etched|carbon)\b",
+    r"|phone case|display (?:case|stand|frame)|wooden|engraved|etched|carbon"
+    # Art cases / extended-art displays: printed artwork around a card, or no card at all.
+    r"|extended art|(?:art|custom|acrylic|resin|epoxy) (?:case|block|display)|art cases?"
+    r"|magnetic (?:art|extended|display)|lenticular|3d art|card art display|shadow ?box)\b",
     re.I,
 )
 _NON_ENGLISH = re.compile(
