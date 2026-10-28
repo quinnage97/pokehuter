@@ -330,7 +330,7 @@ function dealCard(d) {
       <a class="btn primary" href="${esc(d.url)}" target="_blank" rel="noopener">Open on eBay</a>
       <button class="btn icon ${state.basket.has(d.listing_id) ? "on" : ""}" data-act="basket" title="Add to basket to total up">🧺</button>
       <button class="btn icon" data-act="got" title="We bought it: tick it off">✓</button>
-      <button class="btn icon" data-act="fake" title="This is a fake: teach the bot">🚩</button>
+      <button class="btn icon" data-act="fake" title="Report a problem with this listing">🚩</button>
       <button class="btn icon ghost" data-act="dismiss" title="Hide this listing">✕</button>
     </div>
   </article>`;
@@ -703,13 +703,13 @@ function showBasket() {
 // ---------------------------------------------------------------- fake reports
 const FAKE_REASONS = ["Gold / metal / foil card", "Wrong font or blurry print", "Sticker, skin or print", "Fan art / custom / proxy", "Not English", "Wrong card", "Too cheap to be real"];
 function reportFake(listingId, name) {
-  showPicture("", `🚩 Mark ${name} as fake`, `
-    <p class="hint">What gave it away? This teaches the bot: the seller gets blocked, telltale title words and
-      price levels are learned, and the photo check is told what to look for.
+  showPicture("", `🚩 Report an issue: ${name}`, `
+    <p class="hint">What's wrong with this listing? The bot learns from your report: the seller is blocked,
+      telltale title words and price levels are learned, and the photo check is told what to look for.
       Choose only "Wrong card" for a real card listed under the wrong name: it's hidden without blocking the seller.</p>
     <div class="chips multi" id="fake-reasons">${FAKE_REASONS.map((r) => `<button>${esc(r)}</button>`).join("")}</div>
     <p><input id="fake-note" type="text" placeholder="Anything else? (optional)" style="width:100%"></p>
-    <div class="actions end"><button class="btn ghost" data-fake="cancel">Cancel</button><button class="btn primary" data-fake="send">Mark as fake</button></div>`);
+    <div class="actions end"><button class="btn ghost" data-fake="cancel">Cancel</button><button class="btn primary" data-fake="send">Submit issue</button></div>`);
   $("#card-dialog").onclick = async (e) => {
     if (e.target.id === "card-dialog") return e.target.close();
     const chip = e.target.closest("#fake-reasons button");
@@ -727,11 +727,11 @@ function reportFake(listingId, name) {
         return loadDeals();
       }
       const reason = [...chosen, $("#fake-note").value.trim()].filter(Boolean).join("; ");
-      b.textContent = "Learning…";
+      b.textContent = "Submitting…";
       $$("#card-dialog button").forEach((x) => (x.disabled = true));
       const learned = await api(`/api/listings/${encodeURIComponent(listingId)}/fake`, { reason });
       state.basket.delete(listingId);
-      toast(`Thanks! Blocking ${learned.sellers.length} seller${learned.sellers.length === 1 ? "" : "s"} and learning from ${learned.reports.length} report${learned.reports.length === 1 ? "" : "s"} 🧠`);
+      toast(`Issue submitted. Blocking ${learned.sellers.length} seller${learned.sellers.length === 1 ? "" : "s"} and learning from ${learned.reports.length} report${learned.reports.length === 1 ? "" : "s"} 🧠`);
       loadDeals();
       loadBasket();
     }
@@ -750,12 +750,12 @@ function renderLearning(l) {
       <div class="bside"><button class="btn small ghost" data-undo="${r.id}">Undo</button></div>
     </div>`).join("");
   $("#learned").innerHTML = l.reports.length ? `
-    <p class="hint">${l.reports.length} fake${l.reports.length === 1 ? "" : "s"} reported. The bot now:</p>
+    <p class="hint">${l.reports.length} issue${l.reports.length === 1 ? "" : "s"} reported. The bot now:</p>
     <div class="frow"><span class="flabel">Blocks sellers</span><div class="chips">${l.sellers.map((s) => `<span class="badge bad">${esc(s)}</span>`).join("") || `<span class="hint">none</span>`}</div></div>
     <div class="frow"><span class="flabel">Blocks words</span><div class="chips">${l.words.map((w) => `<button data-ignore="${esc(w)}" title="Stop blocking this word">${esc(w)} ✕</button>`).join("") || `<span class="hint">none yet (needs 2+ reports sharing a word)</span>`}</div></div>
     ${l.ignored_words.length ? `<div class="frow"><span class="flabel">Allowed words</span><div class="chips">${l.ignored_words.map((w) => `<button data-restore="${esc(w)}" title="Block again">${esc(w)} ↺</button>`).join("")}</div></div>` : ""}
     <h3 class="pick-h">Reports</h3>${reports}`
-    : `<p class="hint">Nothing yet. Tap 🚩 on any listing that turns out to be fake and the bot will learn from it.</p>`;
+    : `<p class="hint">Nothing yet. Tap 🚩 on any listing with a problem (fake, print, wrong card…) to report an issue, and the bot will learn from it.</p>`;
 }
 $("#learned").addEventListener("click", async (e) => {
   const undo = e.target.closest("[data-undo]");
