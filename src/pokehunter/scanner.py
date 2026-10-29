@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .alerts import AlertError, Telegram, format_deal
+from .alerts import AlertError, Telegram, format_deal, format_reseller
 from .catalog import load_card_refs
 from .config import Settings
 from .db import Database, now_iso
@@ -16,6 +16,7 @@ from .filters import clean, passes
 from .learning import Signals, learn
 from .matching import CONDITION_FACTOR, match_title, variant_label
 from .photocheck import CHEAP_PHOTO_MODEL, REJECT, PhotoChecker
+from .reseller import finds as reseller_finds
 
 log = logging.getLogger(__name__)
 DEAL_WINDOW_HOURS = 18  # how long a listing stays on the site after we last saw it
@@ -139,6 +140,29 @@ class Scanner:
         self.telegram = telegram
         self.photos = photos
         self.signals = Signals()
+        self._collected: set[str] | None = None
+
+    def is_collected(self, item: dict[str, Any]) -> bool:
+        if self._collected is None:
+            self._collected = {
+                r["id"] for r in self.db.query("SELECT id FROM cards WHERE collect = 1")
+            }
+        return item["card_id"] in self._collected
+
+    def reseller_rotation(self, prefs: dict[str, Any]) -> list[str]:
+        """The next few Reseller-tab Pokémon to sweep. Skipped whenever the day's eBay calls
+        are ahead of schedule, so the family's own searches always have room."""
+        names = self.settings.reseller_names
+        count = min(int(prefs["reseller_sweeps_per_scan"]), len(names))
+        if not count:
+            return []
+        now = datetime.now(UTC)
+        day_fraction = (now.hour * 3600 + now.minute * 60 + now.second) / 86400
+        if self.db.calls_today() > self.settings.ebay_daily_call_budget * day_fraction:
+            return []
+        start = int(self.db.get_kv("reseller_cursor", 0) or 0) % len(names)
+        self.db.set_kv("reseller_cursor", (start + count) % len(names))
+        return [names[(start + i) % len(names)] for i in range(count)]
 
     def pick_targets(self, count: int) -> list[dict[str, Any]]:
         """Cards to search individually this round: starred first, then least recently."""
@@ -147,7 +171,7 @@ class Scanner:
             SELECT c.id, c.pokemon, c.local_id, c.set_name, c.set_official,
                    MAX(i.priority) AS priority, MIN(COALESCE(i.last_searched_at, '')) AS searched
             FROM items i JOIN cards c ON c.id = i.card_id
-            WHERE i.owned = 0 AND i.hidden = 0
+            WHERE i.owned = 0 AND i.hidden = 0 AND c.collect = 1
             GROUP BY c.id
             ORDER BY priority DESC, searched ASC, COALESCE(MAX(i.market_gbp), 0) DESC
             LIMIT ?
@@ -199,6 +223,7 @@ class Scanner:
             ).lastrowid
         cards = load_card_refs(self.db)
         cards_by_id = {card.id: card for card in cards}
+        self._collected = None
         items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
         errors: list[str] = []
         stats: dict[str, Any] = {"calls": 0}
@@ -206,6 +231,7 @@ class Scanner:
 
         # 1. Newly listed cards.
         sweeps = [(name, "newlyListed", 200, None) for name in self.settings.pokemon_names]
+        sweeps += [(name, "newlyListed", 200, None) for name in self.reseller_rotation(prefs)]
         await self._run(sweeps, found, errors, stats)
 
         # 2. Card-by-card searches. Cards with a possible deal go first, so the price can be
@@ -216,7 +242,7 @@ class Scanner:
             if not match or match.card.id in verify:
                 continue
             item = items.get(f"{match.card.id}:{match.variant}")
-            if not item or item["owned"] or item["hidden"]:
+            if not item or item["owned"] or item["hidden"] or not self.is_collected(item):
                 continue
             unchecked = {**prefs, "suspicious_above_pct": 1000}
             if evaluate(listing, match.condition, item, unchecked).is_deal:
@@ -312,6 +338,7 @@ class Scanner:
         new_deals = [d for d in new_deals if d["item_id"] not in sold_now]
         new_deals = await self.check_photos(new_deals, prefs)
         alerts = await self._send_alerts(new_deals, prefs, errors)
+        alerts += await self._send_reseller_alerts(seen_now, prefs, errors)
         deal_count = len(self.deals())
         with self.db.tx() as c:
             c.execute(
@@ -346,6 +373,7 @@ class Scanner:
     def refresh_flags(self) -> None:
         """Re-judge stored listings straight away, e.g. after a fake report."""
         prefs = self.db.prefs()
+        self._collected = None
         self.signals = learn(self.db, block_sellers=prefs["block_reported_sellers"])
         items = {row["id"]: row for row in self.db.query("SELECT * FROM items")}
         self.reevaluate(load_card_refs(self.db), items, prefs, set())
@@ -389,8 +417,14 @@ class Scanner:
             verdict = evaluate(listing, row["condition"], item, prefs)
             photo_ok = row["photo_verdict"] not in REJECT
             learned = self.signals.flag(item_id, row["title"], row["seller"], row["total"])
+            # Deals are for the family's collection; other Pokémon only feed the Reseller tab.
             is_deal = (
-                bool(match) and verdict.is_deal and photo_ok and not learned and not row["sold"]
+                bool(match)
+                and verdict.is_deal
+                and photo_ok
+                and not learned
+                and not row["sold"]
+                and self.is_collected(item)
             )
             notes = [match.note] if match and match.note else []
             if learned:
@@ -539,6 +573,38 @@ class Scanner:
             keep.append(deal)
         return keep
 
+    async def _send_reseller_alerts(
+        self, seen_now: set[str], prefs: dict[str, Any], errors: list[str], limit: int = 5
+    ) -> int:
+        """Telegram alerts for new reseller finds (off unless switched on in the tab)."""
+        if not prefs["reseller_alerts"] or not self.settings.telegram_ready:
+            return 0
+        fresh = [
+            f
+            for f in reseller_finds(self.db, prefs)
+            if f["listing_id"] in seen_now and not f["reseller_alerted_at"]
+        ][:limit]
+        checked = await self.check_photos(
+            [{"item_id": f["listing_id"], "priority": 0, "discount": 0} for f in fresh], prefs
+        )
+        keep = {d["item_id"] for d in checked}
+        sent = 0
+        for find in fresh:
+            if find["listing_id"] not in keep:
+                continue
+            try:
+                await self.telegram.send(format_reseller(find, self.settings.public_url))
+            except AlertError as exc:
+                errors.append(str(exc))
+                continue
+            sent += 1
+            with self.db.tx() as c:
+                c.execute(
+                    "UPDATE listings SET reseller_alerted_at = ? WHERE item_id = ?",
+                    (now_iso(), find["listing_id"]),
+                )
+        return sent
+
     async def _send_alerts(
         self, new_deals: list[dict[str, Any]], prefs: dict[str, Any], errors: list[str]
     ) -> int:
@@ -587,7 +653,7 @@ class Scanner:
             JOIN items i ON i.id = l.match_item_id
             JOIN cards c ON c.id = i.card_id
             WHERE l.dismissed = 0 AND l.sold = 0 AND i.owned = 0 AND i.hidden = 0
-              AND l.last_seen >= ?
+              AND c.collect = 1 AND l.last_seen >= ?
               {"AND l.is_deal = 1" if deals_only else ""}
             ORDER BY l.is_deal DESC, i.priority DESC, l.discount_pct DESC
             LIMIT ?

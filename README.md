@@ -1,6 +1,6 @@
 # PokéHunter: Charizard & Mew deal catcher
 
-Every 15 minutes PokéHunter searches eBay UK for Charizard and Mew cards. It works out
+Every 30 minutes PokéHunter searches eBay UK for Charizard and Mew cards. It works out
 exactly which card each listing is (set, number, 1st Edition / holo / reverse holo) and its
 condition (NM / LP / MP / HP / damaged). Then it compares the delivered price with the
 card's market price, adjusted for condition. Good deals show on the website and are sent to
@@ -19,6 +19,9 @@ Telegram.
   and undoable under Settings → What the bot has learned.
 - **🧺 Basket & price-up**: add listings to a basket to see the total with postage and the saving,
   or select card versions in the Collection to add up what they'd cost right now.
+- **💼 Reseller tab**: listings 70–90% below market across 20 popular Pokémon, with an estimated
+  profit after fees and postage, plus reselling tips. Most listings that cheap are fakes or
+  damaged, so it only shows ones that passed every filter and warns you to check them.
 - **Played copies are welcome**: an LP/MP/HP copy is judged against what that condition is
   worth (NM 100%, LP 85%, MP 70%, HP 55%). MP/HP are only considered for cards worth more
   than £15 (adjustable), so cheap cards aren't bought battered.
@@ -89,7 +92,7 @@ cd /opt/pokehunter-app && sudo git pull && sudo bash deploy/install.sh
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | From @BotFather and @userinfobot |
 | `SITE_PASSWORD` | Password for the website |
 | `PUBLIC_URL` | Link added to alerts |
-| `SCAN_INTERVAL_MINUTES` | Default 15 |
+| `SCAN_INTERVAL_MINUTES` | Default 30 |
 | `POKEMON` | Default `Charizard,Mew`. Add more, comma separated |
 | `EBAY_DAILY_CALL_BUDGET` | Default 4500 (eBay's limit is 5000) |
 

@@ -235,3 +235,21 @@ def test_charizard_g_mp_listing():
     match, reason = match_title(title, [CHARIZARD_G])
     assert match, reason
     assert match.variant == "normal" and match.condition == "MP"
+
+
+def test_other_pokemon_forms_and_index():
+    gengar = CardRef(
+        "sm9-53", "Gengar", "Gengar & Mimikyu-GX", "53", "Team Up", 181, {"holo": 10.0}
+    )
+    dark_gyarados = CardRef(
+        "base5-8", "Gyarados", "Dark Gyarados", "8", "Team Rocket", 82, {"holo": 50.0}
+    )
+    rayquaza = CardRef(
+        "xy6-61", "Rayquaza", "Rayquaza-EX", "61", "Roaring Skies", 108, {"holo": 10.0}
+    )
+    cards = [*CARDS, gengar, dark_gyarados, rayquaza]
+    assert match_title("Gengar & Mimikyu GX 53/181 Team Up", cards)[0].card.id == "sm9-53"
+    assert match_title("Dark Gyarados 8/82 Team Rocket holo", cards)[0].card.id == "base5-8"
+    assert match_title("M Rayquaza EX 61/108 Roaring Skies", cards)[0] is None  # Mega form
+    assert match_title("Rayquaza EX 61/108 Roaring Skies", cards)[0].card.id == "xy6-61"
+    assert match_title("Shining Fates Charizard 4/102", cards)[0]  # set name, not a form

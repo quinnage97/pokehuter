@@ -40,7 +40,7 @@ chmod 600 "${ENV_FILE}"
 
 cat >"/etc/systemd/system/${SERVICE}.service" <<UNIT
 [Unit]
-Description=PokéHunter deal catcher (website + 15-minute eBay scanner)
+Description=PokéHunter deal catcher (website + 30-minute eBay scanner)
 After=network-online.target
 Wants=network-online.target
 

@@ -55,7 +55,7 @@ async def _once(settings: Settings, what: str) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="pokehunter", description="Pokémon card deal catcher")
     sub = parser.add_subparsers(dest="command", required=True)
-    serve = sub.add_parser("serve", help="run the website and the 15-minute scanner")
+    serve = sub.add_parser("serve", help="run the website and the 30-minute scanner")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8766)
     sub.add_parser("refresh", help="download the card list and prices now")

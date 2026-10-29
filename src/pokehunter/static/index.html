@@ -22,6 +22,7 @@
     <nav class="tabs" id="tabs">
       <button data-tab="deals" class="active"><span class="ico">🔥</span><span>Deals</span><span id="deal-count" class="pill"></span></button>
       <button data-tab="checklist"><span class="ico">📚</span><span>Collection</span></button>
+      <button data-tab="reseller"><span class="ico">💼</span><span>Reseller</span></button>
       <button data-tab="settings"><span class="ico">⚙️</span><span>Settings</span></button>
     </nav>
   </header>
@@ -121,6 +122,86 @@
       <p class="hint">Tick the versions you own. ⭐ = search every scan and alert at a smaller discount.
         "Alert at £" pings you whenever a copy is listed at or below that price.</p>
       <div id="checklist"></div>
+    </section>
+
+    <!-- RESELLER -->
+    <section id="tab-reseller" hidden>
+      <div class="notice">⚠️ Most listings 70–90% below market are fakes, prints, damaged or the wrong card.
+        Treat every find here as a lead to check carefully, never a sure thing.</div>
+
+      <div class="section-head">
+        <h2>💼 Reseller finds</h2>
+        <select id="r-sort" aria-label="Sort">
+          <option value="profit">Biggest profit</option>
+          <option value="discount">Biggest discount</option>
+          <option value="cheap">Cheapest to buy</option>
+          <option value="new">Newest</option>
+        </select>
+      </div>
+      <div class="chips" id="r-poke"></div>
+      <p id="r-line" class="hint result-line"></p>
+      <div id="reseller" class="deals"></div>
+
+      <details class="panel" id="r-settings">
+        <summary><b>⚙️ Reseller settings</b></summary>
+        <form id="r-prefs">
+          <label class="row">Show listings between <input name="reseller_min_pct" type="number" min="0" max="100">%
+            and <input name="reseller_max_pct" type="number" min="0" max="100">% below market</label>
+          <label class="row">Your selling fees <input name="reseller_fee_pct" type="number" min="0" max="50">%
+            <span class="hint">(eBay UK business sellers ≈ 13%; private sellers pay none)</span></label>
+          <label class="row">Your postage per sale £<input name="reseller_postage_gbp" type="number" min="0"></label>
+          <label class="row">Extra Pokémon searched per scan <input name="reseller_sweeps_per_scan" type="number" min="0" max="18"></label>
+          <label class="row tog"><input name="reseller_alerts" type="checkbox"> Send reseller finds to Telegram</label>
+          <button type="submit" class="btn primary">Save</button>
+        </form>
+        <p class="hint">Profit ≈ what it should resell for in that condition − fees − postage − what you pay.
+          Covers 20 popular Pokémon on a rolling search, roughly once an hour each.</p>
+      </details>
+
+      <details class="panel tips" id="r-tips">
+        <summary><b>📘 Reselling tips</b></summary>
+        <h3>Before you buy</h3>
+        <ul>
+          <li><b>Check what it actually sells for.</b> On eBay, search the card and tick <i>Sold items</i>. Asking prices
+            run high; sold prices are the truth. If you can't sell it for clearly more than you pay plus fees, skip it.</li>
+          <li><b>Assume it's fake until proven otherwise.</b> Compare every photo with the official card: font, colours,
+            holo pattern, border width, energy symbols, the back. Gold/metal cards, blurry text and stock photos are red flags.</li>
+          <li><b>Ask for more photos</b> (front, back, close-ups of corners and surface) from a seller with real feedback.
+            No good photos, no buy.</li>
+          <li><b>Pay only through eBay</b> so you're covered by the eBay Money Back Guarantee. Never pay by bank transfer
+            or PayPal "friends and family" for a listing.</li>
+          <li><b>Start small.</b> Set a monthly budget, buy cards you understand (Charizard, Pikachu, eeveelutions sell
+            quickly) and learn from the first few before spending more.</li>
+        </ul>
+        <h3>Condition is everything</h3>
+        <ul>
+          <li>Check corners, edges, surface scratches and whitening on the back. Sell honestly as NM / LP / MP / HP.
+            Over-grading leads to returns and bad feedback.</li>
+          <li>Near Mint, high-value cards (roughly £100+) can be worth grading (PSA, CGC or ACE in the UK). Grading costs
+            money and takes weeks, so only do it when the graded price clearly covers it.</li>
+        </ul>
+        <h3>Selling</h3>
+        <ul>
+          <li><b>Where:</b> eBay (biggest audience), Vinted (no seller fees, popular in the UK), Facebook groups and
+            local card shops (quick, but they pay less).</li>
+          <li><b>Price</b> just under the cheapest comparable <i>sold</i> price for a quick sale, or list higher with
+            Best Offer turned on. Fast turnover beats waiting for a top price.</li>
+          <li><b>Great photos</b> (both sides, good light, plain background) and an exact title: card name, set,
+            number, condition, "English".</li>
+        </ul>
+        <h3>Posting</h3>
+        <ul>
+          <li>Card in a penny sleeve, then a toploader, inside a card-backed envelope. Use tracked postage for anything
+            over about £20, and signed-for for valuable cards. Keep proof of postage.</li>
+        </ul>
+        <h3>Money and tax</h3>
+        <ul>
+          <li>Record every buy and sale (price, fees, postage) in a simple spreadsheet so you know your real profit.</li>
+          <li>Buying to resell for profit counts as trading. In the UK the first £1,000 a year of trading income is
+            covered by the trading allowance; above that you need to register for Self Assessment. Selling platforms
+            report sellers with 30+ sales or about £1,700+ a year to HMRC. Check gov.uk for current rules.</li>
+        </ul>
+      </details>
     </section>
 
     <!-- SETTINGS -->

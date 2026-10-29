@@ -93,16 +93,18 @@ def digits(value: str) -> int | None:
     return int(found) if found else None
 
 
+_NOT_A_NAME = r"(?!(?:tera|type|energy|mode|holo|rare|edition|fates|legends|star|collection)\b)"
 _FORMS = [
-    ("mega", r"\bmega\b|\bm\s+(?:charizard|mew)\b"),
+    ("mega", r"\bmega\b|\bm\s+[a-z]{4,}"),
     ("gx", r"\bgx\b"),
     ("vmax", r"\bvmax\b"),
     ("vstar", r"\bvstar\b"),
     ("v", r"\bv\b"),
     ("break", r"\bbreak\b"),
-    ("dark", r"\bdark\s+(?:charizard|mew)\b"),
-    ("shining", r"\bshining\s+(?:charizard|mew)\b"),
-    ("radiant", r"\bradiant\s+(?:charizard|mew)\b"),
+    # "Dark Charizard", "Shining Gyarados"... but not "dark tera", "dark type" and the like.
+    ("dark", rf"\bdark\s+{_NOT_A_NAME}[a-z]{{4,}}"),
+    ("shining", rf"\bshining\s+{_NOT_A_NAME}[a-z]{{4,}}"),
+    ("radiant", rf"\bradiant\s+{_NOT_A_NAME}[a-z]{{4,}}"),
     ("delta", r"δ|\bdelta\b"),
 ]
 _FORMS = [(form, re.compile(rx, re.I)) for form, rx in _FORMS]
@@ -189,6 +191,24 @@ def _set_score(card: CardRef, title: str) -> int:
     return sum(1 for w in words if re.search(rf"\b{re.escape(w)}\b", lowered))
 
 
+_INDEX: dict[int, tuple[list[CardRef], int, dict[str, list[CardRef]], list[CardRef]]] = {}
+
+
+def _index(cards: list[CardRef]) -> tuple[dict[str, list[CardRef]], list[CardRef]]:
+    """Cards by number (and the promos), so a title is only compared with cards that could
+    match, which matters with thousands of cards across 20 Pokémon."""
+    cached = _INDEX.get(id(cards))
+    if cached and cached[0] is cards and cached[1] == len(cards):
+        return cached[2], cached[3]
+    by_number: dict[str, list[CardRef]] = {}
+    for card in cards:
+        by_number.setdefault(norm_number(card.local_id), []).append(card)
+    promos = [card for card in cards if card.is_promo]
+    _INDEX.clear()
+    _INDEX[id(cards)] = (cards, len(cards), by_number, promos)
+    return by_number, promos
+
+
 def match_title(title: str, cards: list[CardRef]) -> tuple[Match | None, str]:
     """Return (match, reason). `match` is None when the title should be ignored."""
     if reason := rejection_reason(title):
@@ -203,8 +223,10 @@ def match_title(title: str, cards: list[CardRef]) -> tuple[Match | None, str]:
     title_forms = card_forms(title)
     mewtwo_in_title = word_match("mewtwo", title)
     names_pokemon: dict[str, bool] = {}
+    by_number, promos = _index(cards)
+    pool = by_number.get(next(iter(fractions))[0], []) if fractions else promos
     candidates: list[CardRef] = []
-    for card in cards:
+    for card in pool:
         # The card number is the cheap test, so it goes first.
         number = norm_number(card.local_id)
         if fractions:

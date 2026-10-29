@@ -39,10 +39,15 @@ class Settings(BaseSettings):
     public_url: str | None = None
 
     database_path: Path = Path("var/pokehunter.sqlite3")
-    scan_interval_minutes: int = Field(default=15, ge=5, le=240)
+    scan_interval_minutes: int = Field(default=30, ge=5, le=240)
     catalog_refresh_hours: int = Field(default=24, ge=1)
     tcgdex_base: str = "https://api.tcgdex.net/v2/en"
-    pokemon: str = "Charizard,Mew"
+    pokemon: str = "Charizard,Mew"  # the family's collection (Collection + Deals tabs)
+    # Extra Pokémon searched only for the Reseller tab: the most collected / resold.
+    reseller_pokemon: str = (
+        "Charizard,Pikachu,Mew,Mewtwo,Umbreon,Rayquaza,Lugia,Gengar,Eevee,Espeon,Sylveon,"
+        "Gardevoir,Greninja,Blastoise,Venusaur,Snorlax,Dragonite,Gyarados,Lucario,Mimikyu"
+    )
     log_level: str = "INFO"
 
     # Used only if the live exchange-rate lookup fails.
@@ -52,6 +57,16 @@ class Settings(BaseSettings):
     @property
     def pokemon_names(self) -> list[str]:
         return [name.strip() for name in self.pokemon.split(",") if name.strip()]
+
+    @property
+    def reseller_names(self) -> list[str]:
+        """Reseller Pokémon that aren't already in the collection list."""
+        names = [n.strip() for n in self.reseller_pokemon.split(",") if n.strip()]
+        return [n for n in names if n not in self.pokemon_names]
+
+    @property
+    def all_pokemon(self) -> list[str]:
+        return self.pokemon_names + self.reseller_names
 
     @property
     def ebay_ready(self) -> bool:

@@ -25,6 +25,7 @@ from .filters import clean
 from .learning import learn, record_fake, summary, undo_fake
 from .matching import CONDITION_LABEL, VARIANT_LABEL, variant_label
 from .photocheck import PhotoChecker
+from .reseller import finds as reseller_finds
 from .scanner import Scanner
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ OPEN_PATHS = ("/healthz",)
 
 
 class Engine:
-    """Owns the shared clients and runs the 15-minute background loop."""
+    """Owns the shared clients and runs the 30-minute background loop."""
 
     def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
         self.settings = settings
@@ -163,7 +164,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
             """
             SELECT c.pokemon, COUNT(*) AS total, SUM(i.owned) AS owned
             FROM items i JOIN cards c ON c.id = i.card_id
-            WHERE i.hidden = 0 GROUP BY c.pokemon
+            WHERE i.hidden = 0 AND c.collect = 1 GROUP BY c.pokemon
             """
         )
         return {
@@ -220,6 +221,7 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
                   AND COALESCE(warning, '') NOT LIKE '%Likely fake%'
                 GROUP BY match_item_id
             ) cheap ON cheap.match_item_id = i.id
+            WHERE c.collect = 1
             ORDER BY c.release_date, c.set_id, CAST(c.local_id AS INTEGER), c.local_id,
                      CASE i.variant WHEN 'firstEdition' THEN 0 WHEN 'holo' THEN 1
                                     WHEN 'normal' THEN 2 ELSE 3 END
@@ -497,6 +499,11 @@ def create_app(settings: Settings | None = None, *, run_loop: bool = True) -> Fa
         with engine(request).db.tx() as c:
             c.execute("UPDATE listings SET dismissed=1 WHERE item_id=?", (listing_id,))
         return {"ok": True}
+
+    @app.get("/api/reseller")
+    async def reseller(request: Request) -> dict[str, Any]:
+        e = engine(request)
+        return {"finds": reseller_finds(e.db, e.db.prefs())}
 
     @app.get("/api/filters")
     async def get_filters(request: Request) -> dict[str, Any]:

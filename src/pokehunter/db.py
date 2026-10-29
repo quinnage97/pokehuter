@@ -114,6 +114,8 @@ MIGRATIONS = [
     ("items", "owned_at", "TEXT"),
     ("listings", "sold", "INTEGER NOT NULL DEFAULT 0"),
     ("listings", "checked_at", "TEXT"),
+    ("listings", "reseller_alerted_at", "TEXT"),
+    ("cards", "collect", "INTEGER NOT NULL DEFAULT 1"),
 ]
 
 # Defaults for the options shown on the website's Settings tab.
@@ -137,6 +139,13 @@ DEFAULT_PREFS: dict[str, Any] = {
     "photo_checks_per_day": 20,  # caps what the photo check can cost in a day
     "photo_check_model": "best",  # "best" (Opus) or "cheap" (Haiku)
     "block_reported_sellers": True,
+    # Reseller tab: listings far below market, with a profit estimate.
+    "reseller_min_pct": 70,
+    "reseller_max_pct": 90,
+    "reseller_fee_pct": 13,  # eBay UK business seller fees (private sellers pay none)
+    "reseller_postage_gbp": 2,  # what posting a sold card costs you
+    "reseller_alerts": False,
+    "reseller_sweeps_per_scan": 8,  # extra Pokémon searched per scan, in rotation
     "alerts_enabled": True,
     "max_alerts_per_scan": 10,
     "targeted_per_scan": 30,

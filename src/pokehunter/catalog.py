@@ -162,13 +162,18 @@ async def refresh_catalog(db: Database, settings: Settings, http: httpx.AsyncCli
     fx = await fetch_fx(http, settings)
     db.set_kv("fx", fx)
 
+    # Collection Pokémon first, so a card naming two (e.g. "Mew & Mewtwo-GX") stays with
+    # the collection; the rest are only for the Reseller tab.
     briefs: list[tuple[str, dict[str, Any]]] = []
-    for pokemon in settings.pokemon_names:
+    seen_ids: set[str] = set()
+    for pokemon in settings.all_pokemon:
         response = await http.get(f"{base}/cards", params={"name": pokemon}, timeout=30)
         response.raise_for_status()
         for brief in response.json():
-            if word_match(pokemon, brief.get("name", "")):
+            if word_match(pokemon, brief.get("name", "")) and brief.get("id") not in seen_ids:
+                seen_ids.add(brief.get("id"))
                 briefs.append((pokemon, brief))
+    collection = set(settings.pokemon_names)
 
     semaphore = asyncio.Semaphore(6)
     set_cache: dict[str, dict[str, Any]] = db.get_kv("tcgdex_sets", {}) or {}
@@ -215,9 +220,11 @@ async def refresh_catalog(db: Database, settings: Settings, http: httpx.AsyncCli
             c.execute(
                 """
                 INSERT INTO cards (id, pokemon, name, local_id, set_id, set_name, set_official,
-                    release_date, serie_name, rarity, image, image_alt, pricing_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    release_date, serie_name, rarity, image, image_alt, pricing_json, updated_at,
+                    collect)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    pokemon=excluded.pokemon, collect=excluded.collect,
                     name=excluded.name, local_id=excluded.local_id, set_name=excluded.set_name,
                     set_official=excluded.set_official, release_date=excluded.release_date,
                     serie_name=excluded.serie_name, rarity=excluded.rarity, image=excluded.image,
@@ -239,6 +246,7 @@ async def refresh_catalog(db: Database, settings: Settings, http: httpx.AsyncCli
                     guess_alt_image(card["set"]["id"], str(card.get("localId", ""))),
                     json.dumps(variant_pricing(card)),
                     timestamp,
+                    int(pokemon in collection),
                 ),
             )
             for variant in card_variants(card):

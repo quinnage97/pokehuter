@@ -151,6 +151,15 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 .result-line { margin: 0 2px 8px; }
 .savefilters { border-top: 1px solid var(--line); padding-top: 10px; }
 .conds { gap: 6px 14px; margin-bottom: 6px; }
+.profit { font-size: 14px; margin-top: 4px; padding: 6px 8px; border-radius: 10px; background: var(--bg); }
+.profit.up b { color: var(--good); }
+.profit.down b { color: var(--bad); }
+#r-poke { margin-bottom: 8px; }
+#r-settings summary, #r-tips summary { cursor: pointer; }
+#r-settings, #r-tips { margin-top: 14px; }
+.tips h3 { font-size: 15px; margin: 14px 0 4px; }
+.tips ul { margin: 0; padding-left: 20px; }
+.tips li { margin: 4px 0; font-size: 14px; }
 .savefilters .spacer { flex: 1; }
 
 /* deals */

@@ -79,7 +79,18 @@ TCGDEX_SETS = {
     "swsh8": {"releaseDate": "2021-11-12", "serie": {"id": "swsh", "name": "Sword & Shield"}},
     "A1": {"releaseDate": "2024-10-30", "serie": {"id": "tcgp", "name": "Pokémon TCG Pocket"}},
 }
+TCGDEX_CARDS["base1-58"] = {
+    "id": "base1-58",
+    "localId": "58",
+    "name": "Pikachu",
+    "rarity": "Common",
+    "image": "https://assets.tcgdex.net/en/base/base1/58",
+    "set": {"id": "base1", "name": "Base Set", "cardCount": {"official": 102, "total": 102}},
+    "variants": {"normal": True},
+    "pricing": {"cardmarket": {"trend": 50.0}},
+}
 BRIEFS = {
+    "Pikachu": ["base1-58"],
     "Charizard": ["base1-4", "sv03.5-199", "swsh4-25", "swshp-SWSH050"],
     "Mew": ["swsh8-114", "A1-283", "mewtwo-1"],
 }
@@ -93,7 +104,7 @@ def tcgdex_handler(request):
         return httpx.Response(200, json={"rates": {"EUR": 1.25, "USD": 1.25}})  # €1 = £0.80
     if path.endswith("/cards"):
         name = request.url.params["name"]
-        names = {i: TCGDEX_CARDS.get(i, {}).get("name", "Mewtwo") for i in BRIEFS[name]}
+        names = {i: TCGDEX_CARDS.get(i, {}).get("name", "Mewtwo") for i in BRIEFS.get(name, [])}
         briefs = [{"id": i, "name": n} for i, n in names.items()]
         return httpx.Response(200, json=briefs)
     if "/cards/" in path:

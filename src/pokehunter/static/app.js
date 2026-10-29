@@ -129,6 +129,7 @@ function showTab(tab) {
   store("tab", null, tab);
   if (tab === "checklist") loadCards();
   if (tab === "settings") { loadPrefs(); loadLearning(); }
+  if (tab === "reseller") loadReseller();
   $("#pick-bar").hidden = tab !== "checklist" || !state.picking;
   window.scrollTo({ top: 0 });
 }
@@ -331,7 +332,7 @@ function renderDeals() {
     $("#deals").innerHTML = state.listings.length
       ? `<div class="empty"><div class="big">🔍</div>Nothing matches these filters. <button class="btn ghost small" onclick="document.querySelector('#f-reset').click()">Reset filters</button></div>`
       : `<div class="empty"><div class="big">🕵️</div>${state.scope === "deals"
-        ? "No deals right now. The bot checks eBay every 15 minutes and pings Telegram when it finds one."
+        ? `No deals right now. The bot checks eBay every ${state.status?.interval_minutes ?? 30} minutes and pings Telegram when it finds one.`
         : "No listings seen yet for the cards you still need."}</div>`;
     return;
   }
@@ -412,6 +413,99 @@ $("#deals").addEventListener("click", async (e) => {
     toast("Listing hidden");
   }
   await Promise.all([loadDeals(), loadStatus()]);
+});
+
+// ---------------------------------------------------------------- reseller
+const reseller = { finds: [], poke: "All", sort: store("rsort", "profit") };
+const RSORTS = {
+  profit: (a, b) => b.profit_gbp - a.profit_gbp,
+  discount: (a, b) => b.reseller_discount - a.reseller_discount,
+  cheap: (a, b) => a.total - b.total,
+  new: (a, b) => String(b.listed_at || b.first_seen).localeCompare(String(a.listed_at || a.first_seen)),
+};
+async function loadReseller() {
+  const [{ finds }, prefs] = await Promise.all([api("/api/reseller"), api("/api/prefs")]);
+  reseller.finds = finds;
+  const form = $("#r-prefs");
+  for (const el of form.elements) {
+    if (!el.name || !(el.name in prefs)) continue;
+    if (el.type === "checkbox") el.checked = !!prefs[el.name]; else el.value = prefs[el.name];
+  }
+  renderReseller();
+}
+function renderReseller() {
+  const pokes = ["All", ...new Set(reseller.finds.map((f) => f.pokemon))];
+  if (!pokes.includes(reseller.poke)) reseller.poke = "All";
+  $("#r-poke").innerHTML = pokes.map((p) => `<button data-v="${esc(p)}" class="${p === reseller.poke ? "on" : ""}">${esc(p)}</button>`).join("");
+  $("#r-sort").value = reseller.sort;
+  const shown = reseller.finds.filter((f) => reseller.poke === "All" || f.pokemon === reseller.poke)
+    .sort(RSORTS[reseller.sort] || RSORTS.profit);
+  const profit = shown.filter((f) => f.profit_gbp > 0).reduce((s, f) => s + f.profit_gbp, 0);
+  $("#r-line").textContent = reseller.finds.length
+    ? `${shown.length} find${shown.length === 1 ? "" : "s"} · potential profit ≈ ${gbp(profit)} if all genuine and resold`
+    : "";
+  $("#reseller").innerHTML = shown.length ? shown.map(resellerCard).join("")
+    : `<div class="empty"><div class="big">🔎</div>No finds right now. Genuine cards this cheap are rare; the bot keeps looking across 20 Pokémon.</div>`;
+}
+function resellerCard(f) {
+  const photo = PHOTO[f.photo_verdict];
+  const number = f.local_id + (f.set_official ? "/" + f.set_official : "");
+  return `
+  <article class="deal" data-listing="${esc(f.listing_id)}" data-item="${esc(f.match_item_id)}">
+    <div class="media">
+      ${picture(f.image ? [f.image] : [], "No photo", "photo")}
+      <div class="ref">${picture(cardSources(f), f.card_name)}<span class="lbl">official card</span></div>
+      <span class="off">${Math.round(f.reseller_discount)}% under</span>
+    </div>
+    <div class="body">
+      <div class="name">${esc(f.card_name)}</div>
+      <div class="meta">${esc(f.pokemon)} · ${esc(f.set_name)} · #${esc(number)} · ${esc(f.variant_label)}</div>
+      <div class="priceline"><span class="price">${gbp(f.total)}</span><span class="fair">to buy · market <b>${gbp(f.market_value)}</b></span></div>
+      <div class="profit ${f.profit_gbp > 0 ? "up" : "down"}">Resell ≈ ${gbp(f.resale_gbp)} − fees &amp; postage ${gbp(f.costs_gbp)} → <b>profit ≈ ${gbp(f.profit_gbp)}</b></div>
+      <div class="badges">
+        <span class="badge">${esc(COND[f.condition] || f.condition)}</span>
+        ${photo ? `<span class="badge ${photo[0]}" title="${esc(f.photo_reason || "")}">${photo[1]}</span>` : `<span class="badge warn">📷 Not photo-checked</span>`}
+        <span class="badge good">✓ Compared with ${f.ebay_comps} eBay listings</span>
+        ${f.owned ? `<span class="badge">In your collection</span>` : ""}
+      </div>
+      <div class="title">${esc(f.title)}</div>
+      <div class="meta" style="margin-top:6px">Seller ${esc(f.seller || "?")} (${f.feedback_score ?? "?"} feedback) · seen ${ago(f.last_seen)}</div>
+    </div>
+    <div class="bar">
+      <a class="btn primary" href="${esc(f.url)}" target="_blank" rel="noopener">Check on eBay</a>
+      <button class="btn icon" data-act="fake" title="Report a problem with this listing">🚩</button>
+      <button class="btn icon ghost" data-act="dismiss" title="Hide this listing">✕</button>
+    </div>
+  </article>`;
+}
+$("#r-poke").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  reseller.poke = b.dataset.v;
+  renderReseller();
+});
+$("#r-sort").addEventListener("change", (e) => { reseller.sort = store("rsort", null, e.target.value); renderReseller(); });
+$("#reseller").addEventListener("click", async (e) => {
+  const card = e.target.closest(".deal");
+  if (!card) return;
+  if (e.target.classList.contains("photo")) {
+    showPicture(`<img src="${esc(e.target.src)}" alt="">`, $(".name", card).textContent);
+    return;
+  }
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  if (btn.dataset.act === "fake") return reportFake(card.dataset.listing, $(".name", card).textContent);
+  await api(`/api/listings/${encodeURIComponent(card.dataset.listing)}/dismiss`, {});
+  toast("Hidden");
+  loadReseller();
+});
+$("#r-prefs").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const data = {};
+  for (const el of e.target.elements) if (el.name) data[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  await api("/api/prefs", data);
+  toast("Reseller settings saved ✓");
+  loadReseller();
 });
 
 // ---------------------------------------------------------------- collection
@@ -765,6 +859,7 @@ function reportFake(listingId, name) {
       toast(`Issue submitted. Blocking ${learned.sellers.length} seller${learned.sellers.length === 1 ? "" : "s"} and learning from ${learned.reports.length} report${learned.reports.length === 1 ? "" : "s"} 🧠`);
       loadDeals();
       loadBasket();
+      if (!$("#tab-reseller").hidden) loadReseller();
     }
     $("#card-dialog").close();
   };
