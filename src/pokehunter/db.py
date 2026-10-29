@@ -139,9 +139,10 @@ DEFAULT_PREFS: dict[str, Any] = {
     "photo_checks_per_day": 20,  # caps what the photo check can cost in a day
     "photo_check_model": "best",  # "best" (Opus) or "cheap" (Haiku)
     "block_reported_sellers": True,
-    # Reseller tab: listings far below market, with a profit estimate.
-    "reseller_min_pct": 70,
-    "reseller_max_pct": 90,
+    # Reseller tab: listings priced at 70-90% of market value, with a profit estimate.
+    "reseller_min_of_market": 70,
+    "reseller_max_of_market": 90,
+    "reseller_profit_only": True,
     "reseller_fee_pct": 13,  # eBay UK business seller fees (private sellers pay none)
     "reseller_postage_gbp": 2,  # what posting a sold card costs you
     "reseller_alerts": False,

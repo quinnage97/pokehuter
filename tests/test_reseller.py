@@ -7,18 +7,18 @@ from pokehunter.db import DEFAULT_PREFS
 from pokehunter.reseller import estimate, finds
 from pokehunter.web import create_app
 
-ROW = {"market_gbp": 100.0, "ebay_median_gbp": 90.0, "total": 20.0, "condition": "NM"}
+ROW = {"market_gbp": 100.0, "ebay_median_gbp": 90.0, "total": 72.0, "condition": "NM"}
 
 
 def test_estimate_profit():
     numbers = estimate(ROW, DEFAULT_PREFS)
-    # Market £90 (lower of guide and eBay); 78% under; resell £90 - 13% fees - £2 post.
+    # Market £90 (lower of guide and eBay); £72 is 80% of it; resell £90 - 13% fees - £2.
     assert numbers == {
         "market_value": 90.0,
-        "reseller_discount": 77.8,
+        "reseller_discount": 20.0,
         "resale_gbp": 90.0,
         "costs_gbp": 13.7,
-        "profit_gbp": 56.3,
+        "profit_gbp": 4.3,
     }
     assert estimate({**ROW, "condition": "HP"}, DEFAULT_PREFS)["resale_gbp"] == 49.5
 
@@ -26,8 +26,8 @@ def test_estimate_profit():
 def test_estimate_needs_trustworthy_prices_and_the_band():
     assert estimate({**ROW, "ebay_median_gbp": None}, DEFAULT_PREFS) is None
     assert estimate({**ROW, "market_gbp": 400.0}, DEFAULT_PREFS) is None  # guide vs eBay disagree
-    assert estimate({**ROW, "total": 50.0}, DEFAULT_PREFS) is None  # only 44% under
-    assert estimate({**ROW, "total": 5.0}, DEFAULT_PREFS) is None  # 94% under
+    assert estimate({**ROW, "total": 85.0}, DEFAULT_PREFS) is None  # 94% of market
+    assert estimate({**ROW, "total": 50.0}, DEFAULT_PREFS) is None  # 56% of market
 
 
 def _listing(db, listing_id, item, total, **extra):
@@ -54,13 +54,17 @@ def test_finds_include_other_pokemon_and_skip_junk(catalog_db):
         c.execute(
             "UPDATE items SET ebay_median_gbp = 40, ebay_comps = 6 WHERE id = 'base1-58:normal'"
         )
-    _listing(catalog_db, "pika", "base1-58:normal", 8.0)
-    _listing(catalog_db, "fake", "base1-58:normal", 8.0, photo_verdict="fake")
-    _listing(catalog_db, "reported", "base1-58:normal", 8.0, user_verdict="fake")
-    _listing(catalog_db, "sold", "base1-58:normal", 8.0, sold=1)
+    _listing(catalog_db, "pika", "base1-58:normal", 28.0)  # 70% of £40: £4.80 profit
+    _listing(catalog_db, "thin", "base1-58:normal", 36.0)  # 90%: a loss after fees
+    _listing(catalog_db, "fake", "base1-58:normal", 28.0, photo_verdict="fake")
+    _listing(catalog_db, "reported", "base1-58:normal", 28.0, user_verdict="fake")
+    _listing(catalog_db, "sold", "base1-58:normal", 28.0, sold=1)
     found = finds(catalog_db, DEFAULT_PREFS)
     assert [f["listing_id"] for f in found] == ["pika"]
-    assert found[0]["pokemon"] == "Pikachu" and found[0]["reseller_discount"] == 80.0
+    assert found[0]["pokemon"] == "Pikachu" and found[0]["reseller_discount"] == 30.0
+    everything = finds(catalog_db, {**DEFAULT_PREFS, "reseller_profit_only": False})
+    assert [f["listing_id"] for f in everything] == ["pika", "thin"]
+    assert everything[1]["profit_gbp"] < 0
 
 
 def test_reseller_cards_stay_out_of_the_collection(catalog_db, settings):

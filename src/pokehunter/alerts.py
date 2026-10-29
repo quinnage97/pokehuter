@@ -90,12 +90,12 @@ def format_reseller(find: dict[str, Any], public_url: str | None) -> str:
         f"💼 <b>Reseller find</b>: {html.escape(find['card_name'])} — "
         f"{html.escape(find['set_name'])} #{html.escape(find['local_id'])} ({variant})",
         "",
-        f"<b>£{find['total']:.2f}</b> delivered, {find['reseller_discount']:.0f}% below the "
+        f"<b>£{find['total']:.2f}</b> delivered, {100 - find['reseller_discount']:.0f}% of the "
         f"£{find['market_value']:.2f} market price",
         f"Resell ≈ £{find['resale_gbp']:.2f} · fees + postage ≈ £{find['costs_gbp']:.2f} · "
         f"<b>profit ≈ £{find['profit_gbp']:.2f}</b>",
         f"Condition: {CONDITION_LABEL.get(find['condition'], find['condition'])}",
-        "⚠️ Most listings this cheap are fakes or damaged: check every photo first.",
+        "Check the photos and eBay sold prices before buying.",
         "",
         html.escape(find["title"]),
         "",

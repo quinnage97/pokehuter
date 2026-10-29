@@ -1,8 +1,7 @@
-"""Reseller finds: listings far below market value, with an honest profit estimate.
+"""Reseller finds: listings priced at 70-90% of market value, with an honest profit estimate.
 
-Listings 70-90% below market are usually fakes, prints, damaged or wrong cards, so this only
-considers listings that passed every other filter (junk words, wrong forms, reported sellers,
-the photo check) and whose market price is confirmed by other eBay listings.
+Only listings that passed every other filter (junk words, wrong forms, reported sellers, the
+photo check) and whose market price is confirmed by other eBay listings are considered.
 """
 
 from __future__ import annotations
@@ -24,9 +23,10 @@ def estimate(row: dict[str, Any], prefs: dict[str, Any]) -> dict[str, Any] | Non
     if guide and max(guide, typical) > 2.5 * min(guide, typical):
         return None  # price guide and eBay disagree: one is wrong, so no estimate
     market = min(p for p in (guide, typical) if p)
-    discount = (market - row["total"]) / market * 100
-    if not prefs["reseller_min_pct"] <= discount <= prefs["reseller_max_pct"]:
+    share = row["total"] / market * 100  # price as a % of market value
+    if not prefs["reseller_min_of_market"] <= share <= prefs["reseller_max_of_market"]:
         return None
+    discount = 100 - share
     resale = market * CONDITION_FACTOR.get(row["condition"], 0.8)
     costs = resale * prefs["reseller_fee_pct"] / 100 + prefs["reseller_postage_gbp"]
     return {
@@ -59,7 +59,8 @@ def finds(db: Database, prefs: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for row in rows:
         row["market_gbp"] = row.pop("guide_gbp")
-        if numbers := estimate(row, prefs):
+        numbers = estimate(row, prefs)
+        if numbers and (numbers["profit_gbp"] > 0 or not prefs["reseller_profit_only"]):
             out.append({**row, **numbers, "variant_label": variant_label(row["variant"])})
     out.sort(key=lambda r: -r["profit_gbp"])
     return out

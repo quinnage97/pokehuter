@@ -19,9 +19,9 @@ Telegram.
   and undoable under Settings → What the bot has learned.
 - **🧺 Basket & price-up**: add listings to a basket to see the total with postage and the saving,
   or select card versions in the Collection to add up what they'd cost right now.
-- **💼 Reseller tab**: listings 70–90% below market across 20 popular Pokémon, with an estimated
-  profit after fees and postage, plus reselling tips. Most listings that cheap are fakes or
-  damaged, so it only shows ones that passed every filter and warns you to check them.
+- **💼 Reseller tab**: listings priced at 70–90% of market value across 20 popular Pokémon, with
+  an estimated profit after fees and postage (unprofitable ones hidden by default), plus
+  reselling tips. Only listings that passed every junk and fake filter are shown.
 - **Played copies are welcome**: an LP/MP/HP copy is judged against what that condition is
   worth (NM 100%, LP 85%, MP 70%, HP 55%). MP/HP are only considered for cards worth more
   than £15 (adjustable), so cheap cards aren't bought battered.

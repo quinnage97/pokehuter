@@ -126,14 +126,15 @@
 
     <!-- RESELLER -->
     <section id="tab-reseller" hidden>
-      <div class="notice">⚠️ Most listings 70–90% below market are fakes, prints, damaged or the wrong card.
-        Treat every find here as a lead to check carefully, never a sure thing.</div>
+      <div class="notice">Listings priced at 70–90% of market value, with what you'd make reselling them.
+        Always check the photos and eBay <i>sold</i> prices before buying: estimates aren't guarantees.</div>
 
       <div class="section-head">
         <h2>💼 Reseller finds</h2>
         <select id="r-sort" aria-label="Sort">
           <option value="profit">Biggest profit</option>
-          <option value="discount">Biggest discount</option>
+          <option value="margin">Best return on money</option>
+          <option value="discount">Lowest % of market</option>
           <option value="cheap">Cheapest to buy</option>
           <option value="new">Newest</option>
         </select>
@@ -145,8 +146,9 @@
       <details class="panel" id="r-settings">
         <summary><b>⚙️ Reseller settings</b></summary>
         <form id="r-prefs">
-          <label class="row">Show listings between <input name="reseller_min_pct" type="number" min="0" max="100">%
-            and <input name="reseller_max_pct" type="number" min="0" max="100">% below market</label>
+          <label class="row">Show listings priced at <input name="reseller_min_of_market" type="number" min="0" max="100">%
+            to <input name="reseller_max_of_market" type="number" min="0" max="100">% of market value</label>
+          <label class="row tog"><input name="reseller_profit_only" type="checkbox"> Only show finds that make a profit after fees and postage</label>
           <label class="row">Your selling fees <input name="reseller_fee_pct" type="number" min="0" max="50">%
             <span class="hint">(eBay UK business sellers ≈ 13%; private sellers pay none)</span></label>
           <label class="row">Your postage per sale £<input name="reseller_postage_gbp" type="number" min="0"></label>

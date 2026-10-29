@@ -420,6 +420,7 @@ const reseller = { finds: [], poke: "All", sort: store("rsort", "profit") };
 const RSORTS = {
   profit: (a, b) => b.profit_gbp - a.profit_gbp,
   discount: (a, b) => b.reseller_discount - a.reseller_discount,
+  margin: (a, b) => b.profit_gbp / b.total - a.profit_gbp / a.total,
   cheap: (a, b) => a.total - b.total,
   new: (a, b) => String(b.listed_at || b.first_seen).localeCompare(String(a.listed_at || a.first_seen)),
 };
@@ -445,7 +446,7 @@ function renderReseller() {
     ? `${shown.length} find${shown.length === 1 ? "" : "s"} · potential profit ≈ ${gbp(profit)} if all genuine and resold`
     : "";
   $("#reseller").innerHTML = shown.length ? shown.map(resellerCard).join("")
-    : `<div class="empty"><div class="big">🔎</div>No finds right now. Genuine cards this cheap are rare; the bot keeps looking across 20 Pokémon.</div>`;
+    : `<div class="empty"><div class="big">🔎</div>No profitable finds right now. The bot keeps looking across 20 Pokémon.</div>`;
 }
 function resellerCard(f) {
   const photo = PHOTO[f.photo_verdict];
@@ -455,7 +456,7 @@ function resellerCard(f) {
     <div class="media">
       ${picture(f.image ? [f.image] : [], "No photo", "photo")}
       <div class="ref">${picture(cardSources(f), f.card_name)}<span class="lbl">official card</span></div>
-      <span class="off">${Math.round(f.reseller_discount)}% under</span>
+      <span class="off">${Math.round(100 - f.reseller_discount)}% of market</span>
     </div>
     <div class="body">
       <div class="name">${esc(f.card_name)}</div>
